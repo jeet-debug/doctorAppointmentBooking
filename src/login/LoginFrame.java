@@ -542,7 +542,7 @@ public class LoginFrame extends JFrame {
             g2.drawPolyline(new int[]{7, 11, 19}, new int[]{13, 17, 9}, 3);
             g2.dispose();
         }
-    }
+    } 
 
     // =====================================================
     public static void main(String[] args) {
