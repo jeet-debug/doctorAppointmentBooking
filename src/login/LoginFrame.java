@@ -37,7 +37,7 @@ public class LoginFrame extends JFrame {
     private JPasswordField passwordField;
     private JCheckBox rememberBox;
     private JLabel errorLabel;
-    private GradientButton loginButton;
+    private GradientButton loginButton; 
     private JComponent compactLogo;
     private boolean fullScreen = false;
     private boolean busy = false;

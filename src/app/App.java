@@ -2,14 +2,15 @@ package app;
 
 import appointment.AppointmentsPanel;
 import appointment.BookAppointmentPanel;
+import doctor.DoctorPanel;
 
-import javax.swing.*;
-import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 
 /**
  * MediBook dashboard (redesigned).
@@ -49,6 +50,7 @@ public class App extends JFrame {
     private JPanel pages;
     private BookAppointmentPanel bookPanel;
     private AppointmentsPanel appointmentsPanel;
+    private DoctorPanel doctorPanel;
 
     public App() {
         setTitle("MediBook - Dashboard");
@@ -202,9 +204,11 @@ public class App extends JFrame {
         pages.setOpaque(false);
         bookPanel = new BookAppointmentPanel(this::showAppointmentsPage);
         appointmentsPanel = new AppointmentsPanel(() -> bookPanel.refresh());
+        doctorPanel = new DoctorPanel();
         pages.add(scrollPane, "dash");
         pages.add(bookPanel, "book");
         pages.add(appointmentsPanel, "appts");
+        pages.add(doctorPanel, "doctors");
 
         rightPanel.add(pages, BorderLayout.CENTER);
 
@@ -363,6 +367,10 @@ public class App extends JFrame {
                 case "Appointments":
                     showAppointmentsPage();
                     break;
+                case "Doctors":
+                    showDoctorPage();
+                    break;
+
                 default:
                     // Doctors / Patients pages baad me connect karenge
                     showComingSoon(text);
@@ -382,6 +390,9 @@ public class App extends JFrame {
     private void showAppointmentsPage() {
         appointmentsPanel.refresh();
         pageLayout.show(pages, "appts");
+    }
+    private void showDoctorPage() {
+    pageLayout.show(pages, "doctors");
     }
 
     private void showComingSoon(String name) {
