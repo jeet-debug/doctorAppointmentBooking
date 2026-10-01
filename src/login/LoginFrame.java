@@ -33,7 +33,7 @@ public class LoginFrame extends JFrame {
 
     private final Preferences prefs = Preferences.userNodeForPackage(LoginFrame.class);
 
-    private JTextField usernameField;
+    private JTextField usernameField;       
     private JPasswordField passwordField;
     private JCheckBox rememberBox;
     private JLabel errorLabel;
