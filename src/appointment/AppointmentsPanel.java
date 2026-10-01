@@ -944,7 +944,7 @@ public class AppointmentsPanel extends JPanel {
             e.printStackTrace();
 
             JOptionPane.showMessageDialog(
-                    this,
+                    this,       
                     "Unable to cancel appointment.\n"
                             + e.getMessage(),
                     "Database Error",
