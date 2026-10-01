@@ -1132,6 +1132,7 @@ public class BookAppointmentPanel extends JPanel {
         );
 
         focus.requestFocusInWindow();
+        //comment
     }
 
     private void clearForm() {
