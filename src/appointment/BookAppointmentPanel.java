@@ -5,6 +5,10 @@ import database.DB;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DocumentFilter;
 import java.awt.*;
 import java.sql.*;
 import java.time.LocalDate;
@@ -129,6 +133,10 @@ public class BookAppointmentPanel extends JPanel {
         styleField(tfAge);
         styleField(tfPhone);
 
+        // Age: only digits, max 3 | Phone: only digits, max 10
+        digitsOnly(tfAge, 3);
+        digitsOnly(tfPhone, 10);
+
         styleCombo(cbGender);
         styleCombo(cbSpec);
         styleCombo(cbDoctor);
@@ -140,71 +148,25 @@ public class BookAppointmentPanel extends JPanel {
         JPanel grid = new JPanel(new GridBagLayout());
         grid.setOpaque(false);
 
-        addField(
-                grid,
-                0,
-                0,
-                "Patient Name *",
-                tfName
-        );
+        addField(grid, 0, 0, "Patient Name *", tfName);
+        addField(grid, 1, 0, "Gender", cbGender);
 
-        addField(
-                grid,
-                1,
-                0,
-                "Gender",
-                cbGender
-        );
+        addField(grid, 0, 1, "Age *", tfAge);
+        addField(grid, 1, 1, "Phone Number *", tfPhone);
 
-        addField(
-                grid,
-                0,
-                1,
-                "Age *",
-                tfAge
-        );
+        addField(grid, 0, 2, "Doctor Type / Specialization *", cbSpec);
+        addField(grid, 1, 2, "Select Doctor *", cbDoctor);
 
-        addField(
-                grid,
-                1,
-                1,
-                "Phone Number *",
-                tfPhone
-        );
+        addField(grid, 0, 3, "Appointment Date *", spDate);
+        addField(grid, 1, 3, "Time Slot *", cbTime);
 
-        addField(
-                grid,
-                0,
-                2,
-                "Doctor Type / Specialization *",
-                cbSpec
-        );
+        // Grid ko upar chipkane ke liye wrapper
+        // (CENTER mein direct rakhne se bada gap aa raha tha)
+        JPanel gridWrap = new JPanel(new BorderLayout());
+        gridWrap.setOpaque(false);
+        gridWrap.add(grid, BorderLayout.NORTH);
 
-        addField(
-                grid,
-                1,
-                2,
-                "Select Doctor *",
-                cbDoctor
-        );
-
-        addField(
-                grid,
-                0,
-                3,
-                "Appointment Date *",
-                spDate
-        );
-
-        addField(
-                grid,
-                1,
-                3,
-                "Time Slot *",
-                cbTime
-        );
-
-        form.add(grid, BorderLayout.CENTER);
+        form.add(gridWrap, BorderLayout.CENTER);
 
         // ---------- buttons ----------
 
@@ -218,9 +180,7 @@ public class BookAppointmentPanel extends JPanel {
         book.setFont(new Font(FONT, Font.BOLD, 14));
         book.setPreferredSize(new Dimension(190, 44));
 
-        book.addActionListener(
-                e -> bookAppointment()
-        );
+        book.addActionListener(e -> bookAppointment());
 
         RoundedButton clear = new RoundedButton(
                 "Clear",
@@ -233,16 +193,10 @@ public class BookAppointmentPanel extends JPanel {
         clear.setFont(new Font(FONT, Font.BOLD, 14));
         clear.setPreferredSize(new Dimension(110, 44));
 
-        clear.addActionListener(
-                e -> clearForm()
-        );
+        clear.addActionListener(e -> clearForm());
 
         JPanel btns = new JPanel(
-                new FlowLayout(
-                        FlowLayout.LEFT,
-                        0,
-                        0
-                )
+                new FlowLayout(FlowLayout.LEFT, 0, 0)
         );
 
         btns.setOpaque(false);
@@ -257,195 +211,87 @@ public class BookAppointmentPanel extends JPanel {
 
         Card sum = new Card(22, 26, 22, 26);
 
-        sum.setLayout(
-                new BoxLayout(
-                        sum,
-                        BoxLayout.Y_AXIS
-                )
-        );
+        sum.setLayout(new BoxLayout(sum, BoxLayout.Y_AXIS));
 
-        sum.setPreferredSize(
-                new Dimension(
-                        340 + 2 * SH,
-                        0
-                )
-        );
+        sum.setPreferredSize(new Dimension(340 + 2 * SH, 0));
 
         JLabel st = new JLabel("Booking Summary");
-
-        st.setFont(
-                new Font(
-                        FONT,
-                        Font.BOLD,
-                        17
-                )
-        );
-
+        st.setFont(new Font(FONT, Font.BOLD, 17));
         st.setForeground(TEXT);
         st.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         sum.add(st);
-
-        sum.add(
-                Box.createVerticalStrut(16)
-        );
+        sum.add(Box.createVerticalStrut(16));
 
         sumDoctor = valueLabel();
         sumSpec = valueLabel();
         sumDate = valueLabel();
         sumTime = valueLabel();
 
-        sum.add(
-                summaryRow(
-                        "Doctor",
-                        sumDoctor
-                )
-        );
+        sum.add(summaryRow("Doctor", sumDoctor));
+        sum.add(summaryRow("Specialization", sumSpec));
+        sum.add(summaryRow("Date", sumDate));
+        sum.add(summaryRow("Time", sumTime));
 
-        sum.add(
-                summaryRow(
-                        "Specialization",
-                        sumSpec
-                )
-        );
-
-        sum.add(
-                summaryRow(
-                        "Date",
-                        sumDate
-                )
-        );
-
-        sum.add(
-                summaryRow(
-                        "Time",
-                        sumTime
-                )
-        );
-
-        sum.add(
-                Box.createVerticalStrut(10)
-        );
+        sum.add(Box.createVerticalStrut(10));
 
         JSeparator sep = new JSeparator();
-
         sep.setForeground(LINE);
-        sep.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        2
-                )
-        );
-
-        sep.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 2));
+        sep.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         sum.add(sep);
+        sum.add(Box.createVerticalStrut(14));
 
-        sum.add(
-                Box.createVerticalStrut(14)
-        );
-
-        JLabel feeTitle =
-                new JLabel("Consultation Fee");
-
-        feeTitle.setFont(
-                new Font(
-                        FONT,
-                        Font.PLAIN,
-                        13
-                )
-        );
-
+        JLabel feeTitle = new JLabel("Consultation Fee");
+        feeTitle.setFont(new Font(FONT, Font.PLAIN, 13));
         feeTitle.setForeground(MUTED);
-        feeTitle.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
+        feeTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        sumFee =
-                new JLabel(
-                        RUPEE + " 0"
-                );
-
-        sumFee.setFont(
-                new Font(
-                        FONT,
-                        Font.BOLD,
-                        38
-                )
-        );
-
+        sumFee = new JLabel(RUPEE + " 0");
+        sumFee.setFont(new Font(FONT, Font.BOLD, 38));
         sumFee.setForeground(GREEN);
-        sumFee.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
+        sumFee.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         sum.add(feeTitle);
-
-        sum.add(
-                Box.createVerticalStrut(4)
-        );
-
+        sum.add(Box.createVerticalStrut(4));
         sum.add(sumFee);
-
-        sum.add(
-                Box.createVerticalGlue()
-        );
+        sum.add(Box.createVerticalGlue());
 
         // =====================================================
         // LISTENERS
         // =====================================================
 
         cbSpec.addActionListener(e -> {
-
             if (!updating) {
-
                 refreshDoctors();
-
                 refreshSlots();
-
                 updateSummary();
             }
         });
 
         cbDoctor.addActionListener(e -> {
-
             if (!updating) {
-
                 refreshSlots();
-
                 updateSummary();
             }
         });
 
         cbTime.addActionListener(e -> {
-
             if (!updating) {
-
                 updateSummary();
             }
         });
 
         spDate.addChangeListener(e -> {
-
             if (!updating) {
-
                 refreshSlots();
-
                 updateSummary();
             }
         });
 
-        page.add(
-                form,
-                BorderLayout.CENTER
-        );
-
-        page.add(
-                sum,
-                BorderLayout.EAST
-        );
+        page.add(form, BorderLayout.CENTER);
+        page.add(sum, BorderLayout.EAST);
 
         return page;
     }
@@ -463,8 +309,7 @@ public class BookAppointmentPanel extends JPanel {
             return;
         }
 
-        String oldSpec =
-                (String) cbSpec.getSelectedItem();
+        String oldSpec = (String) cbSpec.getSelectedItem();
 
         updating = true;
 
@@ -478,27 +323,20 @@ public class BookAppointmentPanel extends JPanel {
 
         try (
                 Connection con = DB.getConnection();
-                PreparedStatement ps =
-                        con.prepareStatement(sql);
-                ResultSet rs =
-                        ps.executeQuery()
+                PreparedStatement ps = con.prepareStatement(sql);
+                ResultSet rs = ps.executeQuery()
         ) {
 
             while (rs.next()) {
-
-                cbSpec.addItem(
-                        rs.getString("specialization")
-                );
+                cbSpec.addItem(rs.getString("specialization"));
             }
 
             if (oldSpec != null) {
-
                 cbSpec.setSelectedItem(oldSpec);
             }
 
             if (cbSpec.getSelectedIndex() == -1
                     && cbSpec.getItemCount() > 0) {
-
                 cbSpec.setSelectedIndex(0);
             }
 
@@ -525,18 +363,15 @@ public class BookAppointmentPanel extends JPanel {
             return;
         }
 
-        String spec =
-                (String) cbSpec.getSelectedItem();
+        String spec = (String) cbSpec.getSelectedItem();
 
         updating = true;
 
-        Doctor oldDoctor =
-                (Doctor) cbDoctor.getSelectedItem();
+        Doctor oldDoctor = (Doctor) cbDoctor.getSelectedItem();
 
         cbDoctor.removeAllItems();
 
         if (spec == null || spec.isEmpty()) {
-
             updating = false;
             return;
         }
@@ -550,57 +385,34 @@ public class BookAppointmentPanel extends JPanel {
 
         try (
                 Connection con = DB.getConnection();
-                PreparedStatement ps =
-                        con.prepareStatement(sql)
+                PreparedStatement ps = con.prepareStatement(sql)
         ) {
 
             ps.setString(1, spec);
 
-            try (ResultSet rs =
-                         ps.executeQuery()) {
+            try (ResultSet rs = ps.executeQuery()) {
 
                 while (rs.next()) {
 
-                    int id =
-                            rs.getInt("id");
+                    int id = rs.getInt("id");
+                    String name = rs.getString("name");
+                    String specialization = rs.getString("specialization");
+                    int fee = rs.getBigDecimal("consultation_fee").intValue();
 
-                    String name =
-                            rs.getString("name");
-
-                    String specialization =
-                            rs.getString(
-                                    "specialization"
-                            );
-
-                    int fee =
-                            rs.getBigDecimal(
-                                    "consultation_fee"
-                            ).intValue();
-
-                    Doctor doctor =
-                            new Doctor(
-                                    id,
-                                    name,
-                                    specialization,
-                                    fee
-                            );
-
-                    cbDoctor.addItem(doctor);
+                    cbDoctor.addItem(
+                            new Doctor(id, name, specialization, fee)
+                    );
                 }
             }
 
             // Try to keep previously selected doctor
             if (oldDoctor != null) {
 
-                for (int i = 0;
-                     i < cbDoctor.getItemCount();
-                     i++) {
+                for (int i = 0; i < cbDoctor.getItemCount(); i++) {
 
-                    Doctor current =
-                            cbDoctor.getItemAt(i);
+                    Doctor current = cbDoctor.getItemAt(i);
 
                     if (current.id == oldDoctor.id) {
-
                         cbDoctor.setSelectedIndex(i);
                         break;
                     }
@@ -609,7 +421,6 @@ public class BookAppointmentPanel extends JPanel {
 
             if (cbDoctor.getSelectedIndex() == -1
                     && cbDoctor.getItemCount() > 0) {
-
                 cbDoctor.setSelectedIndex(0);
             }
 
@@ -646,30 +457,16 @@ public class BookAppointmentPanel extends JPanel {
 
         try (
                 Connection con = DB.getConnection();
-                PreparedStatement ps =
-                        con.prepareStatement(sql)
+                PreparedStatement ps = con.prepareStatement(sql)
         ) {
 
-            ps.setInt(
-                    1,
-                    doctor.id
-            );
+            ps.setInt(1, doctor.id);
+            ps.setDate(2, java.sql.Date.valueOf(date));
+            ps.setString(3, time);
 
-            ps.setDate(
-                    2,
-                    java.sql.Date.valueOf(date)
-            );
-
-            ps.setString(
-                    3,
-                    time
-            );
-
-            try (ResultSet rs =
-                         ps.executeQuery()) {
+            try (ResultSet rs = ps.executeQuery()) {
 
                 if (rs.next()) {
-
                     return rs.getInt(1) > 0;
                 }
             }
@@ -704,21 +501,17 @@ public class BookAppointmentPanel extends JPanel {
 
         updating = true;
 
-        Object old =
-                cbTime.getSelectedItem();
+        Object old = cbTime.getSelectedItem();
 
         cbTime.removeAllItems();
 
-        Doctor doctor =
-                (Doctor) cbDoctor.getSelectedItem();
+        Doctor doctor = (Doctor) cbDoctor.getSelectedItem();
 
-        LocalDate date =
-                selectedDate();
+        LocalDate date = selectedDate();
 
         if (doctor != null) {
 
-            LocalTime now =
-                    LocalTime.now();
+            LocalTime now = LocalTime.now();
 
             for (int h = 9; h < 18; h++) {
 
@@ -729,30 +522,18 @@ public class BookAppointmentPanel extends JPanel {
                         continue;
                     }
 
-                    LocalTime time =
-                            LocalTime.of(
-                                    h,
-                                    m
-                            );
+                    LocalTime time = LocalTime.of(h, m);
 
                     // Don't show past time today
-                    if (
-                            date.equals(LocalDate.now())
-                                    && !time.isAfter(now)
-                    ) {
+                    if (date.equals(LocalDate.now())
+                            && !time.isAfter(now)) {
                         continue;
                     }
 
-                    String label =
-                            time.format(TIME_FMT);
+                    String label = time.format(TIME_FMT);
 
                     // Check DB
-                    if (!isSlotTaken(
-                            doctor,
-                            date,
-                            label
-                    )) {
-
+                    if (!isSlotTaken(doctor, date, label)) {
                         cbTime.addItem(label);
                     }
                 }
@@ -760,7 +541,6 @@ public class BookAppointmentPanel extends JPanel {
 
             // Keep previously selected slot
             if (old != null) {
-
                 cbTime.setSelectedItem(old);
             }
         }
@@ -774,25 +554,13 @@ public class BookAppointmentPanel extends JPanel {
             return;
         }
 
-        Doctor doctor =
-                (Doctor) cbDoctor.getSelectedItem();
+        Doctor doctor = (Doctor) cbDoctor.getSelectedItem();
 
-        sumDoctor.setText(
-                doctor == null
-                        ? "-"
-                        : doctor.name
-        );
+        sumDoctor.setText(doctor == null ? "-" : doctor.name);
 
-        sumSpec.setText(
-                doctor == null
-                        ? "-"
-                        : doctor.spec
-        );
+        sumSpec.setText(doctor == null ? "-" : doctor.spec);
 
-        sumDate.setText(
-                selectedDate()
-                        .format(DATE_FMT)
-        );
+        sumDate.setText(selectedDate().format(DATE_FMT));
 
         sumTime.setText(
                 cbTime.getSelectedItem() == null
@@ -801,25 +569,16 @@ public class BookAppointmentPanel extends JPanel {
         );
 
         sumFee.setText(
-                RUPEE
-                        + " "
-                        + (
-                        doctor == null
-                                ? 0
-                                : doctor.fee
-                )
+                RUPEE + " " + (doctor == null ? 0 : doctor.fee)
         );
     }
 
     private LocalDate selectedDate() {
 
-        Date d =
-                (Date) spDate.getValue();
+        Date d = (Date) spDate.getValue();
 
         return d.toInstant()
-                .atZone(
-                        ZoneId.systemDefault()
-                )
+                .atZone(ZoneId.systemDefault())
                 .toLocalDate();
     }
 
@@ -829,35 +588,23 @@ public class BookAppointmentPanel extends JPanel {
 
     private void bookAppointment() {
 
-        String name =
-                tfName.getText().trim();
+        String name = tfName.getText().trim();
+        String ageText = tfAge.getText().trim();
+        String phone = tfPhone.getText().trim();
 
-        String ageText =
-                tfAge.getText().trim();
+        String gender = (String) cbGender.getSelectedItem();
 
-        String phone =
-                tfPhone.getText().trim();
+        Doctor doctor = (Doctor) cbDoctor.getSelectedItem();
 
-        String gender =
-                (String) cbGender.getSelectedItem();
+        String time = (String) cbTime.getSelectedItem();
 
-        Doctor doctor =
-                (Doctor) cbDoctor.getSelectedItem();
-
-        String time =
-                (String) cbTime.getSelectedItem();
-
-        LocalDate date =
-                selectedDate();
+        LocalDate date = selectedDate();
 
         // -----------------------------------------------------
         // VALIDATION
         // -----------------------------------------------------
 
-        if (
-                name.isEmpty()
-                        || !name.matches("[A-Za-z .]+")
-        ) {
+        if (name.isEmpty() || !name.matches("[A-Za-z .]+")) {
 
             warn(
                     "Please enter a valid patient name (letters only).",
@@ -871,40 +618,29 @@ public class BookAppointmentPanel extends JPanel {
 
         try {
 
-            age =
-                    Integer.parseInt(ageText);
+            age = Integer.parseInt(ageText);
 
             if (age < 1 || age > 120) {
-
                 throw new NumberFormatException();
             }
 
         } catch (NumberFormatException ex) {
 
-            warn(
-                    "Please enter a valid age (1 - 120).",
-                    tfAge
-            );
+            warn("Please enter a valid age (1 - 120).", tfAge);
 
             return;
         }
 
         if (!phone.matches("\\d{10}")) {
 
-            warn(
-                    "Phone number must be exactly 10 digits.",
-                    tfPhone
-            );
+            warn("Phone number must be exactly 10 digits.", tfPhone);
 
             return;
         }
 
         if (doctor == null) {
 
-            warn(
-                    "Please select a doctor.",
-                    cbDoctor
-            );
+            warn("Please select a doctor.", cbDoctor);
 
             return;
         }
@@ -924,13 +660,7 @@ public class BookAppointmentPanel extends JPanel {
         // FINAL DB SLOT CHECK
         // -----------------------------------------------------
 
-        if (
-                isSlotTaken(
-                        doctor,
-                        date,
-                        time
-                )
-        ) {
+        if (isSlotTaken(doctor, date, time)) {
 
             warn(
                     "This slot was just booked. Please choose another time.",
@@ -964,8 +694,7 @@ public class BookAppointmentPanel extends JPanel {
         int bookingId = -1;
 
         try (
-                Connection con =
-                        DB.getConnection();
+                Connection con = DB.getConnection();
 
                 PreparedStatement ps =
                         con.prepareStatement(
@@ -974,57 +703,21 @@ public class BookAppointmentPanel extends JPanel {
                         )
         ) {
 
-            ps.setString(
-                    1,
-                    name
-            );
-
-            ps.setInt(
-                    2,
-                    age
-            );
-
-            ps.setString(
-                    3,
-                    phone
-            );
-
-            ps.setString(
-                    4,
-                    gender
-            );
-
-            ps.setInt(
-                    5,
-                    doctor.id
-            );
-
-            ps.setDate(
-                    6,
-                    java.sql.Date.valueOf(date)
-            );
-
-            ps.setString(
-                    7,
-                    time
-            );
-
-            ps.setInt(
-                    8,
-                    doctor.fee
-            );
+            ps.setString(1, name);
+            ps.setInt(2, age);
+            ps.setString(3, phone);
+            ps.setString(4, gender);
+            ps.setInt(5, doctor.id);
+            ps.setDate(6, java.sql.Date.valueOf(date));
+            ps.setString(7, time);
+            ps.setInt(8, doctor.fee);
 
             ps.executeUpdate();
 
-            try (
-                    ResultSet rs =
-                            ps.getGeneratedKeys()
-            ) {
+            try (ResultSet rs = ps.getGeneratedKeys()) {
 
                 if (rs.next()) {
-
-                    bookingId =
-                            rs.getInt(1);
+                    bookingId = rs.getInt(1);
                 }
             }
 
@@ -1064,40 +757,22 @@ public class BookAppointmentPanel extends JPanel {
                         + "Your appointment is booked!"
                         + "</h2>"
 
-                        + "<b>Booking ID:</b> #"
-                        + bookingId
-                        + "<br>"
+                        + "<b>Booking ID:</b> #" + bookingId + "<br>"
 
-                        + "<b>Patient:</b> "
-                        + name
-                        + " ("
-                        + age
-                        + " yrs)<br>"
+                        + "<b>Patient:</b> " + name
+                        + " (" + age + " yrs)<br>"
 
-                        + "<b>Phone:</b> "
-                        + phone
-                        + "<br>"
+                        + "<b>Phone:</b> " + phone + "<br>"
 
-                        + "<b>Doctor:</b> "
-                        + doctor.name
-                        + "<br>"
+                        + "<b>Doctor:</b> " + doctor.name + "<br>"
 
-                        + "<b>Specialization:</b> "
-                        + doctor.spec
-                        + "<br>"
+                        + "<b>Specialization:</b> " + doctor.spec + "<br>"
 
-                        + "<b>Date:</b> "
-                        + date.format(DATE_FMT)
-                        + "<br>"
+                        + "<b>Date:</b> " + date.format(DATE_FMT) + "<br>"
 
-                        + "<b>Time:</b> "
-                        + time
-                        + "<br>"
+                        + "<b>Time:</b> " + time + "<br>"
 
-                        + "<b>Fee:</b> "
-                        + RUPEE
-                        + " "
-                        + doctor.fee
+                        + "<b>Fee:</b> " + RUPEE + " " + doctor.fee
 
                         + "</body></html>";
 
@@ -1119,10 +794,7 @@ public class BookAppointmentPanel extends JPanel {
     // HELPERS
     // =========================================================
 
-    private void warn(
-            String msg,
-            JComponent focus
-    ) {
+    private void warn(String msg, JComponent focus) {
 
         JOptionPane.showMessageDialog(
                 this,
@@ -1132,7 +804,6 @@ public class BookAppointmentPanel extends JPanel {
         );
 
         focus.requestFocusInWindow();
-        //comment
     }
 
     private void clearForm() {
@@ -1158,6 +829,56 @@ public class BookAppointmentPanel extends JPanel {
         updateSummary();
     }
 
+    /**
+     * Field mein sirf digits allow karta hai, maxLength tak.
+     * Typing aur paste dono pe kaam karta hai.
+     * Letters / special characters bilkul type nahi hote.
+     */
+    private static void digitsOnly(JTextField field, int maxLength) {
+
+        ((AbstractDocument) field.getDocument()).setDocumentFilter(
+                new DocumentFilter() {
+
+                    @Override
+                    public void insertString(FilterBypass fb, int offset,
+                                             String text, AttributeSet attr)
+                            throws BadLocationException {
+
+                        replace(fb, offset, 0, text, attr);
+                    }
+
+                    @Override
+                    public void replace(FilterBypass fb, int offset, int length,
+                                        String text, AttributeSet attrs)
+                            throws BadLocationException {
+
+                        // Delete / clear (setText("")) hamesha allow
+                        if (text == null || text.isEmpty()) {
+                            super.replace(fb, offset, length, text, attrs);
+                            return;
+                        }
+
+                        // Sirf digits rakho
+                        String digits = text.replaceAll("\\D", "");
+
+                        // Kitni jagah bachi hai
+                        int current = fb.getDocument().getLength();
+                        int room = maxLength - (current - length);
+
+                        if (room <= 0 || digits.isEmpty()) {
+                            return;
+                        }
+
+                        if (digits.length() > room) {
+                            digits = digits.substring(0, room);
+                        }
+
+                        super.replace(fb, offset, length, digits, attrs);
+                    }
+                }
+        );
+    }
+
     // =========================================================
     // DATE SPINNER
     // =========================================================
@@ -1168,28 +889,12 @@ public class BookAppointmentPanel extends JPanel {
      */
     private static JSpinner createDateSpinner() {
 
-        java.util.Calendar c =
-                java.util.Calendar.getInstance();
+        java.util.Calendar c = java.util.Calendar.getInstance();
 
-        c.set(
-                java.util.Calendar.HOUR_OF_DAY,
-                0
-        );
-
-        c.set(
-                java.util.Calendar.MINUTE,
-                0
-        );
-
-        c.set(
-                java.util.Calendar.SECOND,
-                0
-        );
-
-        c.set(
-                java.util.Calendar.MILLISECOND,
-                0
-        );
+        c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        c.set(java.util.Calendar.MINUTE, 0);
+        c.set(java.util.Calendar.SECOND, 0);
+        c.set(java.util.Calendar.MILLISECOND, 0);
 
         SpinnerDateModel m =
                 new SpinnerDateModel(
@@ -1199,15 +904,9 @@ public class BookAppointmentPanel extends JPanel {
                         java.util.Calendar.DAY_OF_MONTH
                 );
 
-        JSpinner s =
-                new JSpinner(m);
+        JSpinner s = new JSpinner(m);
 
-        s.setEditor(
-                new JSpinner.DateEditor(
-                        s,
-                        "dd-MM-yyyy"
-                )
-        );
+        s.setEditor(new JSpinner.DateEditor(s, "dd-MM-yyyy"));
 
         return s;
     }
@@ -1227,145 +926,68 @@ public class BookAppointmentPanel extends JPanel {
         JPanel p = new JPanel();
 
         p.setOpaque(false);
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
 
-        p.setLayout(
-                new BoxLayout(
-                        p,
-                        BoxLayout.Y_AXIS
-                )
-        );
+        JLabel l = new JLabel(label);
 
-        JLabel l =
-                new JLabel(label);
-
-        l.setFont(
-                new Font(
-                        FONT,
-                        Font.BOLD,
-                        12
-                )
-        );
-
+        l.setFont(new Font(FONT, Font.BOLD, 12));
         l.setForeground(MUTED);
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        l.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
-
-        comp.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
-
-        comp.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        40
-                )
-        );
+        comp.setAlignmentX(Component.LEFT_ALIGNMENT);
+        comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 
         p.add(l);
-
-        p.add(
-                Box.createVerticalStrut(6)
-        );
-
+        p.add(Box.createVerticalStrut(6));
         p.add(comp);
 
-        GridBagConstraints gc =
-                new GridBagConstraints();
+        GridBagConstraints gc = new GridBagConstraints();
 
         gc.gridx = col;
         gc.gridy = row;
 
         gc.weightx = 1;
 
-        gc.fill =
-                GridBagConstraints.HORIZONTAL;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.anchor = GridBagConstraints.NORTH;
 
-        gc.anchor =
-                GridBagConstraints.NORTH;
-
-        gc.insets =
-                new Insets(
-                        0,
-                        col == 0 ? 0 : 10,
-                        14,
-                        col == 0 ? 10 : 0
-                );
+        gc.insets = new Insets(
+                0,
+                col == 0 ? 0 : 10,
+                14,
+                col == 0 ? 10 : 0
+        );
 
         grid.add(p, gc);
     }
 
     private JLabel valueLabel() {
 
-        JLabel l =
-                new JLabel("-");
+        JLabel l = new JLabel("-");
 
-        l.setFont(
-                new Font(
-                        FONT,
-                        Font.BOLD,
-                        14
-                )
-        );
-
+        l.setFont(new Font(FONT, Font.BOLD, 14));
         l.setForeground(TEXT);
 
         return l;
     }
 
-    private JPanel summaryRow(
-            String label,
-            JLabel value
-    ) {
+    private JPanel summaryRow(String label, JLabel value) {
 
-        JPanel row =
-                new JPanel(
-                        new BorderLayout(
-                                10,
-                                0
-                        )
-                );
+        JPanel row = new JPanel(new BorderLayout(10, 0));
 
         row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
 
-        row.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
+        JLabel l = new JLabel(label);
 
-        row.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        34
-                )
-        );
-
-        JLabel l =
-                new JLabel(label);
-
-        l.setFont(
-                new Font(
-                        FONT,
-                        Font.PLAIN,
-                        13
-                )
-        );
-
+        l.setFont(new Font(FONT, Font.PLAIN, 13));
         l.setForeground(MUTED);
 
-        value.setHorizontalAlignment(
-                SwingConstants.RIGHT
-        );
+        value.setHorizontalAlignment(SwingConstants.RIGHT);
 
-        row.add(
-                l,
-                BorderLayout.WEST
-        );
-
-        row.add(
-                value,
-                BorderLayout.CENTER
-        );
+        row.add(l, BorderLayout.WEST);
+        row.add(value, BorderLayout.CENTER);
 
         return row;
     }

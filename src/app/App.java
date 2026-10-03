@@ -2,6 +2,7 @@ package app;
 
 import appointment.AppointmentsPanel;
 import appointment.BookAppointmentPanel;
+import doctor.AllDoctorsPanel;
 import doctor.DoctorPanel;
 
 import java.awt.*;
@@ -57,6 +58,7 @@ public class App extends JFrame {
     private BookAppointmentPanel bookPanel;
     private AppointmentsPanel appointmentsPanel;
     private DoctorPanel doctorPanel;
+    private AllDoctorsPanel allDoctorsPanel;
 
     private JLabel headerTitle;
     private JLabel headerSub;
@@ -253,10 +255,12 @@ public class App extends JFrame {
         bookPanel = new BookAppointmentPanel(this::showAppointmentsPage);
         appointmentsPanel = new AppointmentsPanel(() -> bookPanel.refresh());
         doctorPanel = new DoctorPanel();
+        allDoctorsPanel = new AllDoctorsPanel();
         pages.add(scrollPane, "dash");
         pages.add(bookPanel, "book");
         pages.add(appointmentsPanel, "appts");
         pages.add(doctorPanel, "doctors");
+        pages.add(allDoctorsPanel, "all-doctors");
 
         rightPanel.add(pages, BorderLayout.CENTER);
 
@@ -487,8 +491,10 @@ public class App extends JFrame {
                     showAppointmentsPage();
                     break;
                 case "Doctors":
-                case "All Doctors":
                     showDoctorPage();
+                    break;
+                case "All Doctors":
+                    showAllDoctorsPage();
                     break;
                 case "Patients":
                 case "Settings":
@@ -528,6 +534,11 @@ public class App extends JFrame {
     private void showDoctorPage() {
         markActive("Doctors", "Doctors", "View available doctors");
         pageLayout.show(pages, "doctors");
+    }
+
+    private void showAllDoctorsPage() {
+        markActive("All Doctors", "All Doctors", "Search, filter and manage every doctor");
+        pageLayout.show(pages, "all-doctors");
     }
 
     private void showComingSoon(String name) {
