@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS doctors (
     specialization VARCHAR(100) NOT NULL,
     phone VARCHAR(20),
     email VARCHAR(100),
-    image_path VARCHAR(500) NULL,                                                   
+    image_path VARCHAR(500) NULL,
     gender VARCHAR(20),
     experience INT DEFAULT 0,
     consultation_fee DECIMAL(10,2) DEFAULT 0,
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS doctors (
     available_time VARCHAR(100),
     status VARCHAR(20) DEFAULT 'Active'
 );
+
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -28,32 +29,54 @@ CREATE TABLE IF NOT EXISTS users (
 INSERT IGNORE INTO users (username, password)
 VALUES ('admin', 'admin123');
 
+
 -- Appointments table
 CREATE TABLE IF NOT EXISTS appointments (
     id INT PRIMARY KEY AUTO_INCREMENT,
 
+    -- Follow-up relationship
+    parent_appointment_id INT NULL,
+    appointment_type VARCHAR(20) NOT NULL DEFAULT 'NEW',
+    followup_days INT NULL,
+    followup_reason VARCHAR(255) NULL,
+
+    -- Patient information
     patient_name VARCHAR(100) NOT NULL,
     age INT NOT NULL,
     phone VARCHAR(20) NOT NULL,
     gender VARCHAR(20),
 
+    -- Doctor
     doctor_id INT NOT NULL,
 
+    -- Appointment
     appointment_date DATE NOT NULL,
     appointment_time VARCHAR(20) NOT NULL,
 
+    -- Payment
     fee DECIMAL(10,2) DEFAULT 0,
 
+    -- Status
     status VARCHAR(20) DEFAULT 'Booked',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+    -- Doctor relation
     CONSTRAINT fk_appointments_doctor
         FOREIGN KEY (doctor_id)
         REFERENCES doctors(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
 
+    -- Follow-up relation
+    CONSTRAINT fk_parent_appointment
+        FOREIGN KEY (parent_appointment_id)
+        REFERENCES appointments(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    -- Doctor slot
     UNIQUE KEY uq_doctor_slot
         (doctor_id, appointment_date, appointment_time, status)
+
 ) ENGINE=InnoDB;

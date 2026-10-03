@@ -4,7 +4,7 @@ import appointment.AppointmentsPanel;
 import appointment.BookAppointmentPanel;
 import doctor.AllDoctorsPanel;
 import doctor.DoctorPanel;
-
+import patient.PatientPanel;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Locale;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+
 
 /**
  * MediBook dashboard (professional redesign).
@@ -59,6 +60,7 @@ public class App extends JFrame {
     private AppointmentsPanel appointmentsPanel;
     private DoctorPanel doctorPanel;
     private AllDoctorsPanel allDoctorsPanel;
+    private PatientPanel patientPanel;
 
     private JLabel headerTitle;
     private JLabel headerSub;
@@ -256,11 +258,13 @@ public class App extends JFrame {
         appointmentsPanel = new AppointmentsPanel(() -> bookPanel.refresh());
         doctorPanel = new DoctorPanel();
         allDoctorsPanel = new AllDoctorsPanel();
+        patientPanel = new PatientPanel();
         pages.add(scrollPane, "dash");
         pages.add(bookPanel, "book");
         pages.add(appointmentsPanel, "appts");
         pages.add(doctorPanel, "doctors");
         pages.add(allDoctorsPanel, "all-doctors");
+        pages.add(patientPanel, "patients");
 
         rightPanel.add(pages, BorderLayout.CENTER);
 
@@ -497,6 +501,8 @@ public class App extends JFrame {
                     showAllDoctorsPage();
                     break;
                 case "Patients":
+                    showPatientPage();
+                break;
                 case "Settings":
                     showComingSoon(text);
                     break;
@@ -539,6 +545,15 @@ public class App extends JFrame {
     private void showAllDoctorsPage() {
         markActive("All Doctors", "All Doctors", "Search, filter and manage every doctor");
         pageLayout.show(pages, "all-doctors");
+    }
+    private void showPatientPage() {
+        markActive(
+            "Patients",
+            "Patients",
+            "Manage and filter patient records"
+        );
+
+        pageLayout.show(pages, "patients");
     }
 
     private void showComingSoon(String name) {
