@@ -16,7 +16,9 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 import static appointment.UI.*;
 
@@ -27,8 +29,16 @@ import static appointment.UI.*;
  *
  * Doctors, specializations and appointments
  * are loaded from MySQL database.
+ *
+ * Ek time slot me max MAX_PER_SLOT (2) patients book ho sakte hain.
+ * Slot full hone par wo muted (grey) ho jata hai aur select nahi hota.
  */
 public class BookAppointmentPanel extends JPanel {
+
+    /** Ek slot me kitne patients allowed hain. */
+    private static final int MAX_PER_SLOT = 2;
+
+    private static final Color MUTED_SLOT = new Color(160, 170, 185);
 
     private static final DateTimeFormatter DATE_FMT =
             DateTimeFormatter.ofPattern("dd-MM-yyyy");
@@ -36,13 +46,43 @@ public class BookAppointmentPanel extends JPanel {
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
 
+    /**
+     * Time combo ka item: label + kitni booking ho chuki hai.
+     */
+    private static class Slot {
+
+        final String label;
+        final int booked;
+        final boolean full;
+
+        Slot(String label, int booked) {
+            this.label = label;
+            this.booked = booked;
+            this.full = booked >= MAX_PER_SLOT;
+        }
+
+        @Override
+        public String toString() {
+
+            if (full) {
+                return label + "   (Full)";
+            }
+
+            if (booked > 0) {
+                return label + "   (" + (MAX_PER_SLOT - booked) + " left)";
+            }
+
+            return label;
+        }
+    }
+
     private final Runnable onBooked;
 
     private JTextField tfName, tfAge, tfPhone;
 
     private JComboBox<String> cbGender;
     private JComboBox<String> cbSpec;
-    private JComboBox<String> cbTime;
+    private JComboBox<Slot> cbTime;
 
     private JComboBox<Doctor> cbDoctor;
 
@@ -125,7 +165,20 @@ public class BookAppointmentPanel extends JPanel {
 
         cbSpec = new JComboBox<>();
         cbDoctor = new JComboBox<>();
-        cbTime = new JComboBox<>();
+
+        // Full slot select na ho sake, isliye custom model
+        cbTime = new JComboBox<>(new DefaultComboBoxModel<Slot>() {
+
+            @Override
+            public void setSelectedItem(Object item) {
+
+                if (item instanceof Slot && ((Slot) item).full) {
+                    return; // full slot ko ignore karo
+                }
+
+                super.setSelectedItem(item);
+            }
+        });
 
         spDate = createDateSpinner();
 
@@ -141,6 +194,23 @@ public class BookAppointmentPanel extends JPanel {
         styleCombo(cbSpec);
         styleCombo(cbDoctor);
         styleCombo(cbTime);
+
+        // Full slots ko grey (muted) dikhane ke liye renderer
+        final ListCellRenderer<? super Slot> baseRenderer =
+                cbTime.getRenderer();
+
+        cbTime.setRenderer((list, value, index, isSelected, hasFocus) -> {
+
+            Component c = baseRenderer.getListCellRendererComponent(
+                    list, value, index, isSelected, hasFocus
+            );
+
+            if (value != null && value.full) {
+                c.setForeground(MUTED_SLOT);
+            }
+
+            return c;
+        });
 
         spDate.setFont(new Font(FONT, Font.PLAIN, 14));
         spDate.setPreferredSize(new Dimension(100, 40));
@@ -439,13 +509,66 @@ public class BookAppointmentPanel extends JPanel {
     }
 
     /**
-     * Check whether a doctor slot is already booked.
+     * Ek doctor + date ke har slot ki booking count (ek hi query me).
+     * Key = time label (e.g. "02:00 PM"), Value = kitni 'Booked'.
      */
-    private boolean isSlotTaken(
+    private Map<String, Integer> loadBookedCounts(
+            Doctor doctor,
+            LocalDate date
+    ) {
+
+        Map<String, Integer> counts = new HashMap<>();
+
+        String sql =
+                "SELECT appointment_time, COUNT(*) AS cnt "
+                        + "FROM appointments "
+                        + "WHERE doctor_id = ? "
+                        + "AND appointment_date = ? "
+                        + "AND status = 'Booked' "
+                        + "GROUP BY appointment_time";
+
+        try (
+                Connection con = DB.getConnection();
+                PreparedStatement ps = con.prepareStatement(sql)
+        ) {
+
+            ps.setInt(1, doctor.id);
+            ps.setDate(2, java.sql.Date.valueOf(date));
+
+            try (ResultSet rs = ps.executeQuery()) {
+
+                while (rs.next()) {
+                    counts.put(
+                            rs.getString("appointment_time"),
+                            rs.getInt("cnt")
+                    );
+                }
+            }
+
+        } catch (SQLException ex) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Unable to check appointment slots.\n"
+                            + ex.getMessage(),
+                    "Database Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+
+        return counts;
+    }
+
+    /**
+     * Ek slot par abhi kitni 'Booked' appointments hain.
+     * Same connection use hota hai taaki transaction ke andar chale.
+     */
+    private int bookedCount(
+            Connection con,
             Doctor doctor,
             LocalDate date,
             String time
-    ) {
+    ) throws SQLException {
 
         String sql =
                 "SELECT COUNT(*) "
@@ -455,10 +578,7 @@ public class BookAppointmentPanel extends JPanel {
                         + "AND appointment_time = ? "
                         + "AND status = 'Booked'";
 
-        try (
-                Connection con = DB.getConnection();
-                PreparedStatement ps = con.prepareStatement(sql)
-        ) {
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
 
             ps.setInt(1, doctor.id);
             ps.setDate(2, java.sql.Date.valueOf(date));
@@ -467,22 +587,12 @@ public class BookAppointmentPanel extends JPanel {
             try (ResultSet rs = ps.executeQuery()) {
 
                 if (rs.next()) {
-                    return rs.getInt(1) > 0;
+                    return rs.getInt(1);
                 }
             }
-
-        } catch (SQLException ex) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Unable to check appointment slot.\n"
-                            + ex.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
         }
 
-        return false;
+        return 0;
     }
 
     // =========================================================
@@ -490,8 +600,8 @@ public class BookAppointmentPanel extends JPanel {
     // =========================================================
 
     /**
-     * Fills time combo with free slots
-     * for selected doctor + date.
+     * Fills time combo for selected doctor + date.
+     * Full slots (2 bookings) dikhte hain par muted aur un-selectable.
      */
     private void refreshSlots() {
 
@@ -501,7 +611,8 @@ public class BookAppointmentPanel extends JPanel {
 
         updating = true;
 
-        Object old = cbTime.getSelectedItem();
+        Slot oldSlot = (Slot) cbTime.getSelectedItem();
+        String oldLabel = oldSlot == null ? null : oldSlot.label;
 
         cbTime.removeAllItems();
 
@@ -510,6 +621,8 @@ public class BookAppointmentPanel extends JPanel {
         LocalDate date = selectedDate();
 
         if (doctor != null) {
+
+            Map<String, Integer> counts = loadBookedCounts(doctor, date);
 
             LocalTime now = LocalTime.now();
 
@@ -532,17 +645,41 @@ public class BookAppointmentPanel extends JPanel {
 
                     String label = time.format(TIME_FMT);
 
-                    // Check DB
-                    if (!isSlotTaken(doctor, date, label)) {
-                        cbTime.addItem(label);
-                    }
+                    cbTime.addItem(
+                            new Slot(label, counts.getOrDefault(label, 0))
+                    );
                 }
             }
 
-            // Keep previously selected slot
-            if (old != null) {
-                cbTime.setSelectedItem(old);
+            // Pehle wala slot wapas select karo (agar full nahi hai),
+            // warna pehla available slot.
+            Slot toSelect = null;
+            Slot firstFree = null;
+
+            for (int i = 0; i < cbTime.getItemCount(); i++) {
+
+                Slot s = cbTime.getItemAt(i);
+
+                if (s.full) {
+                    continue;
+                }
+
+                if (firstFree == null) {
+                    firstFree = s;
+                }
+
+                if (s.label.equals(oldLabel)) {
+                    toSelect = s;
+                    break;
+                }
             }
+
+            if (toSelect == null) {
+                toSelect = firstFree;
+            }
+
+            // null => koi free slot nahi
+            cbTime.setSelectedItem(toSelect);
         }
 
         updating = false;
@@ -562,11 +699,9 @@ public class BookAppointmentPanel extends JPanel {
 
         sumDate.setText(selectedDate().format(DATE_FMT));
 
-        sumTime.setText(
-                cbTime.getSelectedItem() == null
-                        ? "-"
-                        : (String) cbTime.getSelectedItem()
-        );
+        Slot slot = (Slot) cbTime.getSelectedItem();
+
+        sumTime.setText(slot == null ? "-" : slot.label);
 
         sumFee.setText(
                 RUPEE + " " + (doctor == null ? 0 : doctor.fee)
@@ -596,7 +731,9 @@ public class BookAppointmentPanel extends JPanel {
 
         Doctor doctor = (Doctor) cbDoctor.getSelectedItem();
 
-        String time = (String) cbTime.getSelectedItem();
+        Slot slot = (Slot) cbTime.getSelectedItem();
+
+        String time = slot == null ? null : slot.label;
 
         LocalDate date = selectedDate();
 
@@ -657,23 +794,10 @@ public class BookAppointmentPanel extends JPanel {
         }
 
         // -----------------------------------------------------
-        // FINAL DB SLOT CHECK
-        // -----------------------------------------------------
-
-        if (isSlotTaken(doctor, date, time)) {
-
-            warn(
-                    "This slot was just booked. Please choose another time.",
-                    cbTime
-            );
-
-            refreshSlots();
-
-            return;
-        }
-
-        // -----------------------------------------------------
-        // INSERT INTO DATABASE
+        // CHECK + INSERT (ek transaction me)
+        //
+        // Doctor row ko lock karte hain taaki 2 users ek saath
+        // book karein to bhi 2 se zyada booking na ho paye.
         // -----------------------------------------------------
 
         String sql =
@@ -692,47 +816,73 @@ public class BookAppointmentPanel extends JPanel {
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Booked')";
 
         int bookingId = -1;
+        boolean slotFull = false;
 
-        try (
-                Connection con = DB.getConnection();
+        try (Connection con = DB.getConnection()) {
 
-                PreparedStatement ps =
-                        con.prepareStatement(
-                                sql,
-                                Statement.RETURN_GENERATED_KEYS
+            con.setAutoCommit(false);
+
+            try {
+
+                // Lock doctor row
+                try (
+                        PreparedStatement lock = con.prepareStatement(
+                                "SELECT id FROM doctors WHERE id = ? FOR UPDATE"
                         )
-        ) {
+                ) {
 
-            ps.setString(1, name);
-            ps.setInt(2, age);
-            ps.setString(3, phone);
-            ps.setString(4, gender);
-            ps.setInt(5, doctor.id);
-            ps.setDate(6, java.sql.Date.valueOf(date));
-            ps.setString(7, time);
-            ps.setInt(8, doctor.fee);
+                    lock.setInt(1, doctor.id);
 
-            ps.executeUpdate();
-
-            try (ResultSet rs = ps.getGeneratedKeys()) {
-
-                if (rs.next()) {
-                    bookingId = rs.getInt(1);
+                    try (ResultSet ignored = lock.executeQuery()) {
+                        // sirf lock lena tha
+                    }
                 }
+
+                if (bookedCount(con, doctor, date, time) >= MAX_PER_SLOT) {
+
+                    slotFull = true;
+                    con.rollback();
+
+                } else {
+
+                    try (
+                            PreparedStatement ps = con.prepareStatement(
+                                    sql,
+                                    Statement.RETURN_GENERATED_KEYS
+                            )
+                    ) {
+
+                        ps.setString(1, name);
+                        ps.setInt(2, age);
+                        ps.setString(3, phone);
+                        ps.setString(4, gender);
+                        ps.setInt(5, doctor.id);
+                        ps.setDate(6, java.sql.Date.valueOf(date));
+                        ps.setString(7, time);
+                        ps.setInt(8, doctor.fee);
+
+                        ps.executeUpdate();
+
+                        try (ResultSet rs = ps.getGeneratedKeys()) {
+
+                            if (rs.next()) {
+                                bookingId = rs.getInt(1);
+                            }
+                        }
+                    }
+
+                    con.commit();
+                }
+
+            } catch (SQLException ex) {
+
+                con.rollback();
+                throw ex;
+
+            } finally {
+
+                con.setAutoCommit(true);
             }
-
-        } catch (SQLIntegrityConstraintViolationException ex) {
-
-            // Another user may have booked the same slot
-            warn(
-                    "This appointment slot is already booked.\n"
-                            + "Please select another time.",
-                    cbTime
-            );
-
-            refreshSlots();
-
-            return;
 
         } catch (SQLException ex) {
 
@@ -743,6 +893,21 @@ public class BookAppointmentPanel extends JPanel {
                     "Database Error",
                     JOptionPane.ERROR_MESSAGE
             );
+
+            return;
+        }
+
+        if (slotFull) {
+
+            warn(
+                    "This slot is now full (" + MAX_PER_SLOT
+                            + " patients booked).\n"
+                            + "Please choose another time.",
+                    cbTime
+            );
+
+            refreshSlots();
+            updateSummary();
 
             return;
         }
