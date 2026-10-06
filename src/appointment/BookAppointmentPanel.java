@@ -1,6 +1,8 @@
 package appointment;
 
 import appointment.AppointmentData.Doctor;
+import appointment.UI.Card;
+import appointment.UI.RoundedButton;
 import database.DB;
 
 import javax.swing.*;
@@ -9,6 +11,8 @@ import javax.swing.text.AbstractDocument;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DocumentFilter;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.sql.*;
 import java.time.LocalDate;
@@ -38,13 +42,17 @@ public class BookAppointmentPanel extends JPanel {
     /** Ek slot me kitne patients allowed hain. */
     private static final int MAX_PER_SLOT = 2;
 
+    /** Height of every input control in the form (compact so all 6 rows fit). */
+    private static final int FIELD_H = 34;
+
     private static final Color MUTED_SLOT = new Color(160, 170, 185);
 
-    private static final DateTimeFormatter DATE_FMT =
-            DateTimeFormatter.ofPattern("dd-MM-yyyy");
+    // Payment-specific orange; keeps this panel independent of UI.java color constants.
+    private static final Color PAYMENT_ORANGE = new Color(234, 138, 20);
 
-    private static final DateTimeFormatter TIME_FMT =
-            DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
 
     /**
      * Time combo ka item: label + kitni booking ho chuki hai.
@@ -76,6 +84,42 @@ public class BookAppointmentPanel extends JPanel {
         }
     }
 
+    /**
+     * Panel that always matches the scroll pane's width, so the form grid
+     * stretches properly and only scrolls vertically when the window is short.
+     */
+    private static class ScrollablePanel extends JPanel implements Scrollable {
+
+        ScrollablePanel(LayoutManager lm) {
+            super(lm);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 64;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
+    }
+
     private final Runnable onBooked;
 
     private JTextField tfName, tfAge, tfPhone;
@@ -93,6 +137,15 @@ public class BookAppointmentPanel extends JPanel {
     private JLabel sumDate;
     private JLabel sumTime;
     private JLabel sumFee;
+    private JLabel sumPaid;
+    private JLabel sumDue;
+    private JLabel sumPaymentStatus;
+
+    // Payment controls
+    private JComboBox<String> cbPaymentType;
+    private JTextField tfPaidAmount;
+    private JComboBox<String> cbPaymentMethod;
+    private JLabel dueField;
 
     private boolean updating;
 
@@ -106,14 +159,21 @@ public class BookAppointmentPanel extends JPanel {
         add(
                 header(
                         "Book Appointment",
-                        "Fill the patient details and book a doctor"
-                ),
-                BorderLayout.NORTH
-        );
+                        "Fill the patient details and book a doctor"),
+                BorderLayout.NORTH);
 
         add(buildPage(), BorderLayout.CENTER);
 
         loadSpecializations();
+        refreshDoctors();
+        refreshSlots();
+
+        // Payment controls depend on the complete UI being initialized.
+        // Initialize them only after buildPage() has finished.
+        SwingUtilities.invokeLater(() -> {
+            updatePaymentFields(false);
+            updateSummary();
+        });
     }
 
     /**
@@ -127,6 +187,8 @@ public class BookAppointmentPanel extends JPanel {
 
         refreshSlots();
 
+        // Keep payment controls in sync when doctor/fee changes.
+        updatePaymentFields(false);
         updateSummary();
     }
 
@@ -142,8 +204,9 @@ public class BookAppointmentPanel extends JPanel {
 
         // ---------- form card ----------
 
-        Card form = new Card(22, 26, 22, 26);
-        form.setLayout(new BorderLayout(0, 14));
+        // Smaller padding so all 6 rows + buttons fit
+        Card form = new Card(16, 26, 16, 26);
+        form.setLayout(new BorderLayout(0, 10));
 
         JLabel ft = new JLabel("Patient & Appointment Details");
         ft.setFont(new Font(FONT, Font.BOLD, 17));
@@ -156,12 +219,11 @@ public class BookAppointmentPanel extends JPanel {
         tfPhone = new JTextField();
 
         cbGender = new JComboBox<>(
-                new String[]{
+                new String[] {
                         "Male",
                         "Female",
                         "Other"
-                }
-        );
+                });
 
         cbSpec = new JComboBox<>();
         cbDoctor = new JComboBox<>();
@@ -196,14 +258,12 @@ public class BookAppointmentPanel extends JPanel {
         styleCombo(cbTime);
 
         // Full slots ko grey (muted) dikhane ke liye renderer
-        final ListCellRenderer<? super Slot> baseRenderer =
-                cbTime.getRenderer();
+        final ListCellRenderer<? super Slot> baseRenderer = cbTime.getRenderer();
 
         cbTime.setRenderer((list, value, index, isSelected, hasFocus) -> {
 
             Component c = baseRenderer.getListCellRendererComponent(
-                    list, value, index, isSelected, hasFocus
-            );
+                    list, value, index, isSelected, hasFocus);
 
             if (value != null && value.full) {
                 c.setForeground(MUTED_SLOT);
@@ -213,7 +273,6 @@ public class BookAppointmentPanel extends JPanel {
         });
 
         spDate.setFont(new Font(FONT, Font.PLAIN, 14));
-        spDate.setPreferredSize(new Dimension(100, 40));
 
         JPanel grid = new JPanel(new GridBagLayout());
         grid.setOpaque(false);
@@ -230,13 +289,82 @@ public class BookAppointmentPanel extends JPanel {
         addField(grid, 0, 3, "Appointment Date *", spDate);
         addField(grid, 1, 3, "Time Slot *", cbTime);
 
-        // Grid ko upar chipkane ke liye wrapper
-        // (CENTER mein direct rakhne se bada gap aa raha tha)
-        JPanel gridWrap = new JPanel(new BorderLayout());
+        // ---------- PAYMENT ----------
+
+        cbPaymentType = new JComboBox<>(
+                new String[] {
+                        "Full Payment",
+                        "Partial Payment",
+                        "Custom Payment",
+                        "Pay Later"
+                });
+
+        tfPaidAmount = new JTextField();
+
+        cbPaymentMethod = new JComboBox<>(
+                new String[] {
+                        "Cash",
+                        "UPI",
+                        "Card",
+                        "Online"
+                });
+
+        styleCombo(cbPaymentType);
+        styleField(tfPaidAmount);
+        styleCombo(cbPaymentMethod);
+
+        digitsAndDecimalOnly(tfPaidAmount, 10);
+
+        tfPaidAmount.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                updatePaymentSummary();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                updatePaymentSummary();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                updatePaymentSummary();
+            }
+        });
+
+        // User changed the payment type -> reset amount and focus it if editable
+        cbPaymentType.addActionListener(e -> updatePaymentFields(true));
+
+        addField(grid, 0, 4, "Payment Type *", cbPaymentType);
+        addField(grid, 1, 4, "Payment Method", cbPaymentMethod);
+        addField(grid, 0, 5, "Amount Paid", tfPaidAmount);
+
+        dueField = new JLabel(RUPEE + " 0.00");
+        dueField.setFont(new Font(FONT, Font.BOLD, 14));
+        dueField.setForeground(GREEN);
+        dueField.setBorder(new EmptyBorder(6, 10, 6, 10));
+        dueField.setOpaque(true);
+        dueField.setBackground(new Color(240, 253, 244));
+        addField(grid, 1, 5, "Due Amount", dueField);
+
+        // Grid ko upar chipkane ke liye wrapper.
+        // Wrapper tracks scroll-pane width, so a vertical scrollbar appears
+        // (instead of fields being cut off) when the window is short.
+        JPanel gridWrap = new ScrollablePanel(new BorderLayout());
         gridWrap.setOpaque(false);
         gridWrap.add(grid, BorderLayout.NORTH);
 
-        form.add(gridWrap, BorderLayout.CENTER);
+        JScrollPane gridScroll = new JScrollPane(
+                gridWrap,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+
+        gridScroll.setBorder(null);
+        gridScroll.setOpaque(false);
+        gridScroll.getViewport().setOpaque(false);
+        gridScroll.getVerticalScrollBar().setUnitIncrement(16);
+
+        form.add(gridScroll, BorderLayout.CENTER);
 
         // ---------- buttons ----------
 
@@ -244,8 +372,7 @@ public class BookAppointmentPanel extends JPanel {
                 "Book Appointment",
                 BLUE,
                 DARK_BLUE,
-                40
-        );
+                40);
 
         book.setFont(new Font(FONT, Font.BOLD, 14));
         book.setPreferredSize(new Dimension(190, 44));
@@ -256,8 +383,7 @@ public class BookAppointmentPanel extends JPanel {
                 "Clear",
                 new Color(226, 232, 240),
                 new Color(210, 219, 230),
-                40
-        );
+                40);
 
         clear.setForeground(TEXT);
         clear.setFont(new Font(FONT, Font.BOLD, 14));
@@ -266,8 +392,7 @@ public class BookAppointmentPanel extends JPanel {
         clear.addActionListener(e -> clearForm());
 
         JPanel btns = new JPanel(
-                new FlowLayout(FlowLayout.LEFT, 0, 0)
-        );
+                new FlowLayout(FlowLayout.LEFT, 0, 0));
 
         btns.setOpaque(false);
 
@@ -297,11 +422,17 @@ public class BookAppointmentPanel extends JPanel {
         sumSpec = valueLabel();
         sumDate = valueLabel();
         sumTime = valueLabel();
+        sumPaid = valueLabel();
+        sumDue = valueLabel();
+        sumPaymentStatus = valueLabel();
 
         sum.add(summaryRow("Doctor", sumDoctor));
         sum.add(summaryRow("Specialization", sumSpec));
         sum.add(summaryRow("Date", sumDate));
         sum.add(summaryRow("Time", sumTime));
+        sum.add(summaryRow("Paid", sumPaid));
+        sum.add(summaryRow("Due", sumDue));
+        sum.add(summaryRow("Payment Status", sumPaymentStatus));
 
         sum.add(Box.createVerticalStrut(10));
 
@@ -313,7 +444,7 @@ public class BookAppointmentPanel extends JPanel {
         sum.add(sep);
         sum.add(Box.createVerticalStrut(14));
 
-        JLabel feeTitle = new JLabel("Consultation Fee");
+        JLabel feeTitle = new JLabel("Total Consultation Fee");
         feeTitle.setFont(new Font(FONT, Font.PLAIN, 13));
         feeTitle.setForeground(MUTED);
         feeTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -337,6 +468,7 @@ public class BookAppointmentPanel extends JPanel {
                 refreshDoctors();
                 refreshSlots();
                 updateSummary();
+                updatePaymentFields(false);
             }
         });
 
@@ -344,6 +476,7 @@ public class BookAppointmentPanel extends JPanel {
             if (!updating) {
                 refreshSlots();
                 updateSummary();
+                updatePaymentFields(false);
             }
         });
 
@@ -385,8 +518,7 @@ public class BookAppointmentPanel extends JPanel {
 
         cbSpec.removeAllItems();
 
-        String sql =
-                "SELECT DISTINCT specialization " +
+        String sql = "SELECT DISTINCT specialization " +
                 "FROM doctors " +
                 "WHERE status = 'Active' " +
                 "ORDER BY specialization";
@@ -394,8 +526,7 @@ public class BookAppointmentPanel extends JPanel {
         try (
                 Connection con = DB.getConnection();
                 PreparedStatement ps = con.prepareStatement(sql);
-                ResultSet rs = ps.executeQuery()
-        ) {
+                ResultSet rs = ps.executeQuery()) {
 
             while (rs.next()) {
                 cbSpec.addItem(rs.getString("specialization"));
@@ -417,8 +548,7 @@ public class BookAppointmentPanel extends JPanel {
                     "Unable to load specializations.\n"
                             + ex.getMessage(),
                     "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+                    JOptionPane.ERROR_MESSAGE);
         }
 
         updating = false;
@@ -446,17 +576,15 @@ public class BookAppointmentPanel extends JPanel {
             return;
         }
 
-        String sql =
-                "SELECT id, name, specialization, consultation_fee "
-                        + "FROM doctors "
-                        + "WHERE specialization = ? "
-                        + "AND status = 'Active' "
-                        + "ORDER BY name";
+        String sql = "SELECT id, name, specialization, consultation_fee "
+                + "FROM doctors "
+                + "WHERE specialization = ? "
+                + "AND status = 'Active' "
+                + "ORDER BY name";
 
         try (
                 Connection con = DB.getConnection();
-                PreparedStatement ps = con.prepareStatement(sql)
-        ) {
+                PreparedStatement ps = con.prepareStatement(sql)) {
 
             ps.setString(1, spec);
 
@@ -470,8 +598,7 @@ public class BookAppointmentPanel extends JPanel {
                     int fee = rs.getBigDecimal("consultation_fee").intValue();
 
                     cbDoctor.addItem(
-                            new Doctor(id, name, specialization, fee)
-                    );
+                            new Doctor(id, name, specialization, fee));
                 }
             }
 
@@ -501,8 +628,7 @@ public class BookAppointmentPanel extends JPanel {
                     "Unable to load doctors.\n"
                             + ex.getMessage(),
                     "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+                    JOptionPane.ERROR_MESSAGE);
         }
 
         updating = false;
@@ -514,23 +640,20 @@ public class BookAppointmentPanel extends JPanel {
      */
     private Map<String, Integer> loadBookedCounts(
             Doctor doctor,
-            LocalDate date
-    ) {
+            LocalDate date) {
 
         Map<String, Integer> counts = new HashMap<>();
 
-        String sql =
-                "SELECT appointment_time, COUNT(*) AS cnt "
-                        + "FROM appointments "
-                        + "WHERE doctor_id = ? "
-                        + "AND appointment_date = ? "
-                        + "AND status = 'Booked' "
-                        + "GROUP BY appointment_time";
+        String sql = "SELECT appointment_time, COUNT(*) AS cnt "
+                + "FROM appointments "
+                + "WHERE doctor_id = ? "
+                + "AND appointment_date = ? "
+                + "AND status = 'Booked' "
+                + "GROUP BY appointment_time";
 
         try (
                 Connection con = DB.getConnection();
-                PreparedStatement ps = con.prepareStatement(sql)
-        ) {
+                PreparedStatement ps = con.prepareStatement(sql)) {
 
             ps.setInt(1, doctor.id);
             ps.setDate(2, java.sql.Date.valueOf(date));
@@ -540,8 +663,7 @@ public class BookAppointmentPanel extends JPanel {
                 while (rs.next()) {
                     counts.put(
                             rs.getString("appointment_time"),
-                            rs.getInt("cnt")
-                    );
+                            rs.getInt("cnt"));
                 }
             }
 
@@ -552,8 +674,7 @@ public class BookAppointmentPanel extends JPanel {
                     "Unable to check appointment slots.\n"
                             + ex.getMessage(),
                     "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+                    JOptionPane.ERROR_MESSAGE);
         }
 
         return counts;
@@ -567,16 +688,14 @@ public class BookAppointmentPanel extends JPanel {
             Connection con,
             Doctor doctor,
             LocalDate date,
-            String time
-    ) throws SQLException {
+            String time) throws SQLException {
 
-        String sql =
-                "SELECT COUNT(*) "
-                        + "FROM appointments "
-                        + "WHERE doctor_id = ? "
-                        + "AND appointment_date = ? "
-                        + "AND appointment_time = ? "
-                        + "AND status = 'Booked'";
+        String sql = "SELECT COUNT(*) "
+                + "FROM appointments "
+                + "WHERE doctor_id = ? "
+                + "AND appointment_date = ? "
+                + "AND appointment_time = ? "
+                + "AND status = 'Booked'";
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
 
@@ -595,12 +714,102 @@ public class BookAppointmentPanel extends JPanel {
         return 0;
     }
 
+    /**
+     * Load selected doctor's availability from database.
+     */
+    private String[] loadDoctorAvailability(int doctorId) {
+
+        String sql = "SELECT available_days, available_time " +
+                "FROM doctors " +
+                "WHERE id = ?";
+
+        try (
+                Connection con = DB.getConnection();
+                PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setInt(1, doctorId);
+
+            try (ResultSet rs = ps.executeQuery()) {
+
+                if (rs.next()) {
+
+                    String days = rs.getString("available_days");
+                    String time = rs.getString("available_time");
+
+                    return new String[] {
+                            days == null ? "" : days.trim(),
+                            time == null ? "" : time.trim()
+                    };
+                }
+            }
+
+        } catch (SQLException ex) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Unable to load doctor's availability.\n"
+                            + ex.getMessage(),
+                    "Database Error",
+                    JOptionPane.ERROR_MESSAGE);
+        }
+
+        return new String[] { "", "" };
+    }
+
     // =========================================================
     // LOGIC
     // =========================================================
 
     /**
-     * Fills time combo for selected doctor + date.
+     * Check whether doctor is available on selected day.
+     *
+     * Database example:
+     * "Mon, Tue, Wed, Thu, Fri, Sat"
+     */
+    private boolean isDoctorAvailableOnDay(
+            String availableDays,
+            LocalDate date) {
+
+        if (availableDays == null || availableDays.trim().isEmpty()) {
+            return false;
+        }
+
+        String selectedDay = date.format(
+                DateTimeFormatter.ofPattern(
+                        "EEE",
+                        Locale.ENGLISH));
+
+        String[] days = availableDays.split(",");
+
+        for (String day : days) {
+
+            if (day.trim().equalsIgnoreCase(selectedDay)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Parse doctor's saved time.
+     *
+     * Example:
+     * "10:00 AM"
+     */
+    private LocalTime parseDoctorTime(String value) {
+
+        return LocalTime.parse(
+                value.trim(),
+                TIME_FMT);
+    }
+
+    /**
+     * Fills time combo using doctor's actual
+     * available_days + available_time from database.
+     *
+     * One slot = 30 minutes.
+     * Maximum 2 patients per slot.
      * Full slots (2 bookings) dikhte hain par muted aur un-selectable.
      */
     private void refreshSlots() {
@@ -612,7 +821,10 @@ public class BookAppointmentPanel extends JPanel {
         updating = true;
 
         Slot oldSlot = (Slot) cbTime.getSelectedItem();
-        String oldLabel = oldSlot == null ? null : oldSlot.label;
+
+        String oldLabel = oldSlot == null
+                ? null
+                : oldSlot.label;
 
         cbTime.removeAllItems();
 
@@ -620,67 +832,170 @@ public class BookAppointmentPanel extends JPanel {
 
         LocalDate date = selectedDate();
 
-        if (doctor != null) {
+        if (doctor == null) {
 
-            Map<String, Integer> counts = loadBookedCounts(doctor, date);
-
-            LocalTime now = LocalTime.now();
-
-            for (int h = 9; h < 18; h++) {
-
-                for (int m = 0; m < 60; m += 30) {
-
-                    // Lunch break
-                    if (h == 13) {
-                        continue;
-                    }
-
-                    LocalTime time = LocalTime.of(h, m);
-
-                    // Don't show past time today
-                    if (date.equals(LocalDate.now())
-                            && !time.isAfter(now)) {
-                        continue;
-                    }
-
-                    String label = time.format(TIME_FMT);
-
-                    cbTime.addItem(
-                            new Slot(label, counts.getOrDefault(label, 0))
-                    );
-                }
-            }
-
-            // Pehle wala slot wapas select karo (agar full nahi hai),
-            // warna pehla available slot.
-            Slot toSelect = null;
-            Slot firstFree = null;
-
-            for (int i = 0; i < cbTime.getItemCount(); i++) {
-
-                Slot s = cbTime.getItemAt(i);
-
-                if (s.full) {
-                    continue;
-                }
-
-                if (firstFree == null) {
-                    firstFree = s;
-                }
-
-                if (s.label.equals(oldLabel)) {
-                    toSelect = s;
-                    break;
-                }
-            }
-
-            if (toSelect == null) {
-                toSelect = firstFree;
-            }
-
-            // null => koi free slot nahi
-            cbTime.setSelectedItem(toSelect);
+            updating = false;
+            return;
         }
+
+        // ---------------------------------------------------------
+        // LOAD DOCTOR AVAILABILITY
+        // ---------------------------------------------------------
+
+        String[] availability = loadDoctorAvailability(doctor.id);
+
+        String availableDays = availability[0];
+
+        String availableTime = availability[1];
+
+        // ---------------------------------------------------------
+        // CHECK DAY
+        // ---------------------------------------------------------
+
+        if (!isDoctorAvailableOnDay(
+                availableDays,
+                date)) {
+
+            updating = false;
+
+            updateSummary();
+
+            return;
+        }
+
+        // ---------------------------------------------------------
+        // CHECK TIME RANGE
+        // ---------------------------------------------------------
+
+        if (availableTime.isEmpty()) {
+
+            updating = false;
+
+            updateSummary();
+
+            return;
+        }
+
+        String[] parts = availableTime.split(
+                "\\s+-\\s+",
+                2);
+
+        if (parts.length != 2) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Invalid doctor availability time format:\n"
+                            + availableTime
+                            + "\n\nExpected format:\n"
+                            + "10:00 AM - 05:00 PM",
+                    "Availability Error",
+                    JOptionPane.WARNING_MESSAGE);
+
+            updating = false;
+            return;
+        }
+
+        LocalTime startTime;
+        LocalTime endTime;
+
+        try {
+
+            startTime = parseDoctorTime(parts[0]);
+
+            endTime = parseDoctorTime(parts[1]);
+
+        } catch (Exception ex) {
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Unable to read doctor's available time:\n"
+                            + availableTime,
+                    "Availability Error",
+                    JOptionPane.WARNING_MESSAGE);
+
+            updating = false;
+            return;
+        }
+
+        if (!startTime.isBefore(endTime)) {
+
+            updating = false;
+            return;
+        }
+
+        // ---------------------------------------------------------
+        // BOOKING COUNT
+        // ---------------------------------------------------------
+
+        Map<String, Integer> counts = loadBookedCounts(
+                doctor,
+                date);
+
+        LocalTime now = LocalTime.now();
+
+        // ---------------------------------------------------------
+        // CREATE 30-MINUTE SLOTS
+        // ---------------------------------------------------------
+
+        LocalTime current = startTime;
+
+        while (current.isBefore(endTime)) {
+
+            // Don't show past slots for today
+            if (date.equals(LocalDate.now())
+                    && !current.isAfter(now)) {
+
+                current = current.plusMinutes(30);
+
+                continue;
+            }
+
+            String label = current.format(TIME_FMT);
+
+            int booked = counts.getOrDefault(
+                    label,
+                    0);
+
+            cbTime.addItem(
+                    new Slot(
+                            label,
+                            booked));
+
+            current = current.plusMinutes(30);
+        }
+
+        // ---------------------------------------------------------
+        // SELECT OLD SLOT OR FIRST FREE SLOT
+        // ---------------------------------------------------------
+
+        Slot toSelect = null;
+        Slot firstFree = null;
+
+        for (int i = 0; i < cbTime.getItemCount(); i++) {
+
+            Slot s = cbTime.getItemAt(i);
+
+            if (s.full) {
+                continue;
+            }
+
+            if (firstFree == null) {
+                firstFree = s;
+            }
+
+            if (s.label.equals(oldLabel)) {
+
+                toSelect = s;
+                break;
+            }
+        }
+
+        if (toSelect == null) {
+            toSelect = firstFree;
+        }
+
+        cbTime.setSelectedItem(
+                toSelect);
 
         updating = false;
     }
@@ -704,8 +1019,143 @@ public class BookAppointmentPanel extends JPanel {
         sumTime.setText(slot == null ? "-" : slot.label);
 
         sumFee.setText(
-                RUPEE + " " + (doctor == null ? 0 : doctor.fee)
-        );
+                RUPEE + " " + (doctor == null ? "0.00" : money(doctor.fee)));
+
+        updatePaymentSummary();
+    }
+
+    /**
+     * Updates paid/due/status display according to the selected payment type.
+     */
+    private void updatePaymentSummary() {
+
+        if (sumPaid == null || sumDue == null || sumPaymentStatus == null) {
+            return;
+        }
+
+        Doctor doctor = cbDoctor == null ? null : (Doctor) cbDoctor.getSelectedItem();
+        double totalFee = doctor == null ? 0.0 : doctor.fee;
+
+        double paid = 0.0;
+        String paymentType = cbPaymentType == null
+                ? "Full Payment"
+                : String.valueOf(cbPaymentType.getSelectedItem());
+
+        if ("Pay Later".equals(paymentType)) {
+            paid = 0.0;
+        } else if ("Full Payment".equals(paymentType)) {
+            paid = totalFee;
+        } else {
+            paid = parseMoney(tfPaidAmount == null ? "" : tfPaidAmount.getText());
+        }
+
+        double due = Math.max(0.0, totalFee - paid);
+
+        sumPaid.setText(RUPEE + " " + money(paid));
+        sumDue.setText(RUPEE + " " + money(due));
+
+        String status;
+        if (totalFee <= 0.0) {
+            status = "No Fee";
+        } else if (paid <= 0.0) {
+            status = "Pending";
+        } else if (due > 0.0) {
+            status = "Partial";
+        } else {
+            status = "Paid";
+        }
+
+        sumPaymentStatus.setText(status);
+
+        if (dueField != null) {
+            dueField.setText(RUPEE + " " + money(due));
+            dueField.setForeground(due > 0.0 ? PAYMENT_ORANGE : GREEN);
+            dueField.setBackground(due > 0.0
+                    ? new Color(255, 247, 237)
+                    : new Color(240, 253, 244));
+        }
+    }
+
+    /**
+     * Keeps amount/method controls consistent with payment type.
+     *
+     * @param focusAmount true only when the user just changed the payment type,
+     *                    so the amount box gets focus (and focus is not stolen
+     *                    when the doctor/fee changes).
+     */
+    private void updatePaymentFields(boolean focusAmount) {
+
+        if (cbPaymentType == null || tfPaidAmount == null || cbPaymentMethod == null) {
+            return;
+        }
+
+        Doctor doctor = cbDoctor == null ? null : (Doctor) cbDoctor.getSelectedItem();
+        double fee = doctor == null ? 0.0 : doctor.fee;
+
+        String type = String.valueOf(cbPaymentType.getSelectedItem());
+
+        if ("Full Payment".equals(type)) {
+            // Complete consultation fee is paid now.
+            tfPaidAmount.setText(money(fee));
+            tfPaidAmount.setEditable(false);
+            cbPaymentMethod.setEnabled(true);
+
+        } else if ("Partial Payment".equals(type)) {
+            // Partial Payment = default 50% of the consultation fee.
+            // Patient can still edit this amount if needed.
+            tfPaidAmount.setEditable(true);
+            cbPaymentMethod.setEnabled(true);
+
+            double defaultPartial = fee > 0.0 ? fee / 2.0 : 0.0;
+            String currentText = tfPaidAmount.getText().trim();
+            double currentAmount = parseMoney(currentText);
+
+            if (focusAmount
+                    || currentText.isEmpty()
+                    || Double.compare(currentAmount, fee) == 0
+                    || Double.compare(currentAmount, 0.0) == 0) {
+                tfPaidAmount.setText(money(defaultPartial));
+            }
+
+            if (focusAmount) {
+                tfPaidAmount.requestFocusInWindow();
+                tfPaidAmount.selectAll();
+            }
+
+        } else if ("Custom Payment".equals(type)) {
+            // Custom Payment = patient decides the exact amount.
+            // Example: fee 700 -> patient may enter 500 and pay 200 later.
+            tfPaidAmount.setEditable(true);
+            cbPaymentMethod.setEnabled(true);
+
+            if (focusAmount) {
+                // Clear the previous amount so the patient can enter any amount.
+                tfPaidAmount.setText("");
+                tfPaidAmount.requestFocusInWindow();
+            }
+
+        } else if ("Pay Later".equals(type)) {
+            tfPaidAmount.setText("0.00");
+            tfPaidAmount.setEditable(false);
+            cbPaymentMethod.setEnabled(false);
+        }
+
+        updatePaymentSummary();
+    }
+
+    private static String money(double amount) {
+        return String.format(Locale.ENGLISH, "%.2f", amount);
+    }
+
+    private static double parseMoney(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException ex) {
+            return 0.0;
+        }
     }
 
     private LocalDate selectedDate() {
@@ -737,6 +1187,11 @@ public class BookAppointmentPanel extends JPanel {
 
         LocalDate date = selectedDate();
 
+        String paymentType = String.valueOf(cbPaymentType.getSelectedItem());
+        String paymentMethod = String.valueOf(cbPaymentMethod.getSelectedItem());
+        double totalFee = doctor == null ? 0.0 : doctor.fee;
+        double paidAmount = parseMoney(tfPaidAmount.getText());
+
         // -----------------------------------------------------
         // VALIDATION
         // -----------------------------------------------------
@@ -745,8 +1200,7 @@ public class BookAppointmentPanel extends JPanel {
 
             warn(
                     "Please enter a valid patient name (letters only).",
-                    tfName
-            );
+                    tfName);
 
             return;
         }
@@ -787,11 +1241,51 @@ public class BookAppointmentPanel extends JPanel {
             warn(
                     "No free time slot for this doctor on the selected date.\n"
                             + "Please choose another date or doctor.",
-                    spDate
-            );
+                    spDate);
 
             return;
         }
+
+        if ("Full Payment".equals(paymentType)) {
+
+            paidAmount = totalFee;
+
+        } else if ("Pay Later".equals(paymentType)) {
+
+            paidAmount = 0.0;
+
+        } else if ("Partial Payment".equals(paymentType)
+                || "Custom Payment".equals(paymentType)) {
+
+            if (paidAmount <= 0.0) {
+                warn(
+                        "Please enter the amount paid by the patient.",
+                        tfPaidAmount);
+                return;
+            }
+
+            if (totalFee <= 0.0) {
+                warn(
+                        "Doctor consultation fee is not available.",
+                        cbDoctor);
+                return;
+            }
+
+            // For both Partial and Custom Payment, paid amount must be
+            // strictly less than the total fee.
+            if (paidAmount >= totalFee) {
+                warn(
+                        ("Custom Payment".equals(paymentType)
+                                ? "Custom payment must be less than the total fee.\n"
+                                : "Partial payment must be less than the total fee.\n")
+                                + "Total Fee: " + RUPEE + " " + money(totalFee) + "\n"
+                                + "You entered: " + RUPEE + " " + money(paidAmount),
+                        tfPaidAmount);
+                return;
+            }
+        }
+
+        double dueAmount = Math.max(0.0, totalFee - paidAmount);
 
         // -----------------------------------------------------
         // CHECK + INSERT (ek transaction me)
@@ -800,20 +1294,19 @@ public class BookAppointmentPanel extends JPanel {
         // book karein to bhi 2 se zyada booking na ho paye.
         // -----------------------------------------------------
 
-        String sql =
-                "INSERT INTO appointments "
-                        + "("
-                        + "patient_name, "
-                        + "age, "
-                        + "phone, "
-                        + "gender, "
-                        + "doctor_id, "
-                        + "appointment_date, "
-                        + "appointment_time, "
-                        + "fee, "
-                        + "status"
-                        + ") "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Booked')";
+        String sql = "INSERT INTO appointments "
+                + "("
+                + "patient_name, "
+                + "age, "
+                + "phone, "
+                + "gender, "
+                + "doctor_id, "
+                + "appointment_date, "
+                + "appointment_time, "
+                + "fee, "
+                + "status"
+                + ") "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Booked')";
 
         int bookingId = -1;
         boolean slotFull = false;
@@ -827,9 +1320,7 @@ public class BookAppointmentPanel extends JPanel {
                 // Lock doctor row
                 try (
                         PreparedStatement lock = con.prepareStatement(
-                                "SELECT id FROM doctors WHERE id = ? FOR UPDATE"
-                        )
-                ) {
+                                "SELECT id FROM doctors WHERE id = ? FOR UPDATE")) {
 
                     lock.setInt(1, doctor.id);
 
@@ -848,9 +1339,7 @@ public class BookAppointmentPanel extends JPanel {
                     try (
                             PreparedStatement ps = con.prepareStatement(
                                     sql,
-                                    Statement.RETURN_GENERATED_KEYS
-                            )
-                    ) {
+                                    Statement.RETURN_GENERATED_KEYS)) {
 
                         ps.setString(1, name);
                         ps.setInt(2, age);
@@ -868,6 +1357,35 @@ public class BookAppointmentPanel extends JPanel {
                             if (rs.next()) {
                                 bookingId = rs.getInt(1);
                             }
+                        }
+                    }
+
+                    // Save first payment in the same transaction.
+                    // Pay Later creates no payment record because nothing was paid.
+                    if (paidAmount > 0.0) {
+
+                        String paymentSql = "INSERT INTO payments "
+                                + "(appointment_id, amount, payment_method, payment_status, payment_note) "
+                                + "VALUES (?, ?, ?, 'Paid', ?)";
+
+                        try (PreparedStatement paymentPs = con.prepareStatement(paymentSql)) {
+
+                            paymentPs.setInt(1, bookingId);
+                            paymentPs.setDouble(2, paidAmount);
+                            paymentPs.setString(3, paymentMethod);
+
+                            String paymentNote;
+
+                            if ("Custom Payment".equals(paymentType)) {
+                                paymentNote = "Custom payment at booking";
+                            } else if ("Partial Payment".equals(paymentType)) {
+                                paymentNote = "Partial payment at booking";
+                            } else {
+                                paymentNote = "Full payment at booking";
+                            }
+
+                            paymentPs.setString(4, paymentNote);
+                            paymentPs.executeUpdate();
                         }
                     }
 
@@ -891,8 +1409,7 @@ public class BookAppointmentPanel extends JPanel {
                     "Unable to book appointment.\n\n"
                             + ex.getMessage(),
                     "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+                    JOptionPane.ERROR_MESSAGE);
 
             return;
         }
@@ -903,8 +1420,7 @@ public class BookAppointmentPanel extends JPanel {
                     "This slot is now full (" + MAX_PER_SLOT
                             + " patients booked).\n"
                             + "Please choose another time.",
-                    cbTime
-            );
+                    cbTime);
 
             refreshSlots();
             updateSummary();
@@ -916,37 +1432,37 @@ public class BookAppointmentPanel extends JPanel {
         // SUCCESS MESSAGE
         // -----------------------------------------------------
 
-        String msg =
-                "<html><body style='width:300px;font-family:Segoe UI;'>"
-                        + "<h2 style='color:#29A05F;margin:0 0 8px 0;'>"
-                        + "Your appointment is booked!"
-                        + "</h2>"
+        String msg = "<html><body style='width:300px;font-family:Segoe UI;'>"
+                + "<h2 style='color:#29A05F;margin:0 0 8px 0;'>"
+                + "Your appointment is booked!"
+                + "</h2>"
 
-                        + "<b>Booking ID:</b> #" + bookingId + "<br>"
+                + "<b>Booking ID:</b> #" + bookingId + "<br>"
 
-                        + "<b>Patient:</b> " + name
-                        + " (" + age + " yrs)<br>"
+                + "<b>Patient:</b> " + name
+                + " (" + age + " yrs)<br>"
 
-                        + "<b>Phone:</b> " + phone + "<br>"
+                + "<b>Phone:</b> " + phone + "<br>"
 
-                        + "<b>Doctor:</b> " + doctor.name + "<br>"
+                + "<b>Doctor:</b> " + doctor.name + "<br>"
 
-                        + "<b>Specialization:</b> " + doctor.spec + "<br>"
+                + "<b>Specialization:</b> " + doctor.spec + "<br>"
 
-                        + "<b>Date:</b> " + date.format(DATE_FMT) + "<br>"
+                + "<b>Date:</b> " + date.format(DATE_FMT) + "<br>"
 
-                        + "<b>Time:</b> " + time + "<br>"
+                + "<b>Time:</b> " + time + "<br>"
 
-                        + "<b>Fee:</b> " + RUPEE + " " + doctor.fee
-
-                        + "</body></html>";
+                + "<b>Total Fee:</b> " + RUPEE + " " + money(totalFee) + "<br>"
+                + "<b>Paid:</b> " + RUPEE + " " + money(paidAmount) + "<br>"
+                + "<b>Due:</b> " + RUPEE + " " + money(dueAmount) + "<br>"
+                + "<b>Payment:</b> " + paymentType
+                + "</body></html>";
 
         JOptionPane.showMessageDialog(
                 this,
                 msg,
                 "MediBook - Booking Confirmed",
-                JOptionPane.INFORMATION_MESSAGE
-        );
+                JOptionPane.INFORMATION_MESSAGE);
 
         clearForm();
 
@@ -965,8 +1481,7 @@ public class BookAppointmentPanel extends JPanel {
                 this,
                 msg,
                 "MediBook",
-                JOptionPane.WARNING_MESSAGE
-        );
+                JOptionPane.WARNING_MESSAGE);
 
         focus.requestFocusInWindow();
     }
@@ -978,6 +1493,11 @@ public class BookAppointmentPanel extends JPanel {
         tfPhone.setText("");
 
         cbGender.setSelectedIndex(0);
+
+        if (cbPaymentMethod != null) {
+            cbPaymentMethod.setSelectedItem("Cash");
+            cbPaymentMethod.setEnabled(true);
+        }
 
         updating = true;
 
@@ -991,7 +1511,13 @@ public class BookAppointmentPanel extends JPanel {
 
         refreshDoctors();
         refreshSlots();
+
+        if (cbPaymentType != null) {
+            cbPaymentType.setSelectedItem("Full Payment");
+        }
+
         updateSummary();
+        updatePaymentFields(false);
     }
 
     /**
@@ -1006,7 +1532,7 @@ public class BookAppointmentPanel extends JPanel {
 
                     @Override
                     public void insertString(FilterBypass fb, int offset,
-                                             String text, AttributeSet attr)
+                            String text, AttributeSet attr)
                             throws BadLocationException {
 
                         replace(fb, offset, 0, text, attr);
@@ -1014,7 +1540,7 @@ public class BookAppointmentPanel extends JPanel {
 
                     @Override
                     public void replace(FilterBypass fb, int offset, int length,
-                                        String text, AttributeSet attrs)
+                            String text, AttributeSet attrs)
                             throws BadLocationException {
 
                         // Delete / clear (setText("")) hamesha allow
@@ -1040,8 +1566,55 @@ public class BookAppointmentPanel extends JPanel {
 
                         super.replace(fb, offset, length, digits, attrs);
                     }
-                }
-        );
+                });
+    }
+
+    /**
+     * Allows digits and one decimal point. Used for payment amount.
+     */
+    private static void digitsAndDecimalOnly(JTextField field, int maxLength) {
+
+        ((AbstractDocument) field.getDocument()).setDocumentFilter(
+                new DocumentFilter() {
+
+                    @Override
+                    public void insertString(
+                            FilterBypass fb,
+                            int offset,
+                            String text,
+                            AttributeSet attr) throws BadLocationException {
+                        replace(fb, offset, 0, text, attr);
+                    }
+
+                    @Override
+                    public void replace(
+                            FilterBypass fb,
+                            int offset,
+                            int length,
+                            String text,
+                            AttributeSet attrs) throws BadLocationException {
+
+                        if (text == null || text.isEmpty()) {
+                            super.replace(fb, offset, length, text, attrs);
+                            return;
+                        }
+
+                        String current = fb.getDocument().getText(0, fb.getDocument().getLength());
+                        String next = current.substring(0, offset)
+                                + text
+                                + current.substring(offset + length);
+
+                        if (!next.matches("\\d*(\\.\\d{0,2})?")) {
+                            return;
+                        }
+
+                        if (next.length() > maxLength) {
+                            return;
+                        }
+
+                        super.replace(fb, offset, length, text, attrs);
+                    }
+                });
     }
 
     // =========================================================
@@ -1061,13 +1634,11 @@ public class BookAppointmentPanel extends JPanel {
         c.set(java.util.Calendar.SECOND, 0);
         c.set(java.util.Calendar.MILLISECOND, 0);
 
-        SpinnerDateModel m =
-                new SpinnerDateModel(
-                        new Date(),
-                        c.getTime(),
-                        null,
-                        java.util.Calendar.DAY_OF_MONTH
-                );
+        SpinnerDateModel m = new SpinnerDateModel(
+                new Date(),
+                c.getTime(),
+                null,
+                java.util.Calendar.DAY_OF_MONTH);
 
         JSpinner s = new JSpinner(m);
 
@@ -1080,13 +1651,17 @@ public class BookAppointmentPanel extends JPanel {
     // SMALL BUILDERS
     // =========================================================
 
+    /**
+     * Adds a label + control to the grid.
+     * Every control is forced to a compact FIELD_H height so that all
+     * 6 rows (including Amount Paid + Due Amount) fit inside the card.
+     */
     private void addField(
             JPanel grid,
             int col,
             int row,
             String label,
-            JComponent comp
-    ) {
+            JComponent comp) {
 
         JPanel p = new JPanel();
 
@@ -1100,10 +1675,14 @@ public class BookAppointmentPanel extends JPanel {
         l.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         comp.setAlignmentX(Component.LEFT_ALIGNMENT);
-        comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+
+        // Override any height set by styleField()/styleCombo()
+        comp.setPreferredSize(new Dimension(100, FIELD_H));
+        comp.setMinimumSize(new Dimension(50, FIELD_H));
+        comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, FIELD_H));
 
         p.add(l);
-        p.add(Box.createVerticalStrut(6));
+        p.add(Box.createVerticalStrut(4));
         p.add(comp);
 
         GridBagConstraints gc = new GridBagConstraints();
@@ -1119,9 +1698,8 @@ public class BookAppointmentPanel extends JPanel {
         gc.insets = new Insets(
                 0,
                 col == 0 ? 0 : 10,
-                14,
-                col == 0 ? 10 : 0
-        );
+                4,
+                col == 0 ? 10 : 0);
 
         grid.add(p, gc);
     }

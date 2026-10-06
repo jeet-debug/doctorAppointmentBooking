@@ -16,6 +16,12 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Locale;
+
+import database.DB;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
@@ -52,6 +58,13 @@ public class App extends JFrame {
     private JPanel cardsPanel;
     private JPanel actionPanel;
     private JPanel sidebar;
+
+    // Dynamic dashboard values
+    private JLabel totalAppointmentsValue;
+    private JLabel todayAppointmentsValue;
+    private JLabel totalDoctorsValue;
+    private JLabel totalPatientsValue;
+    private JPanel activityCard;
     private boolean fullScreen;
 
     private CardLayout pageLayout;
@@ -223,10 +236,10 @@ public class App extends JFrame {
         contentPanel.add(Box.createVerticalStrut(6));
 
         cardsPanel = new FlowGrid(4, 4);
-        cardsPanel.add(createStatCard("Total Appointments", "24", BLUE, "calendar"));
-        cardsPanel.add(createStatCard("Today's Appointments", "08", GREEN, "clock"));
-        cardsPanel.add(createStatCard("Total Doctors", "12", PURPLE, "doctor"));
-        cardsPanel.add(createStatCard("Total Patients", "156", ORANGE, "users"));
+        cardsPanel.add(createStatCard("Total Appointments", "0", BLUE, "calendar"));
+        cardsPanel.add(createStatCard("Today's Appointments", "0", GREEN, "clock"));
+        cardsPanel.add(createStatCard("Total Doctors", "0", PURPLE, "doctor"));
+        cardsPanel.add(createStatCard("Total Patients", "0", ORANGE, "users"));
         contentPanel.add(cardsPanel);
 
         contentPanel.add(Box.createVerticalStrut(22));
@@ -255,7 +268,10 @@ public class App extends JFrame {
         pages = new JPanel(pageLayout);
         pages.setOpaque(false);
         bookPanel = new BookAppointmentPanel(this::showAppointmentsPage);
-        appointmentsPanel = new AppointmentsPanel(() -> bookPanel.refresh());
+        appointmentsPanel = new AppointmentsPanel(() -> {
+            bookPanel.refresh();
+            refreshDashboardData();
+        });
         doctorPanel = new DoctorPanel();
         allDoctorsPanel = new AllDoctorsPanel();
         patientPanel = new PatientPanel();
@@ -270,6 +286,9 @@ public class App extends JFrame {
 
         mainPanel.add(sidebar, BorderLayout.WEST);
         mainPanel.add(rightPanel, BorderLayout.CENTER);
+
+        // Load live values from MySQL after all dashboard components exist.
+        refreshDashboardData();
 
         mainPanel.addComponentListener(new ComponentAdapter() {
             @Override
@@ -522,6 +541,7 @@ public class App extends JFrame {
 
     private void showDashboardPage() {
         markActive("Dashboard", "Dashboard", "Welcome to MediBook");
+        refreshDashboardData();
         pageLayout.show(pages, "dash");
     }
 
@@ -597,6 +617,19 @@ public class App extends JFrame {
 
         card.add(bubbleWrap, BorderLayout.WEST);
         card.add(text, BorderLayout.CENTER);
+
+        // Keep references to the value labels so the dashboard
+        // can update them with live database values.
+        if ("Total Appointments".equals(title)) {
+            totalAppointmentsValue = valueLabel;
+        } else if ("Today's Appointments".equals(title)) {
+            todayAppointmentsValue = valueLabel;
+        } else if ("Total Doctors".equals(title)) {
+            totalDoctorsValue = valueLabel;
+        } else if ("Total Patients".equals(title)) {
+            totalPatientsValue = valueLabel;
+        }
+
         return card;
     }
 
@@ -665,47 +698,184 @@ public class App extends JFrame {
     // =========================================================
 
     private JPanel createActivityCard() {
+        activityCard = new RoundedPanel(20, null, 20, 22, 18, 22, Color.WHITE, true);
+        activityCard.setLayout(new BorderLayout());
+        activityCard.setBorder(new EmptyBorder(18, 20, 18, 20));
 
-        RoundedPanel card = new RoundedPanel(20, null, 20, 24, 20, 24, Color.WHITE, true);
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        refreshActivityCard();
 
-        JLabel title = new JLabel("Welcome to MediBook!");
-        title.setFont(new Font(FONT, Font.BOLD, 15));
+        return activityCard;
+    }
+
+    /**
+     * Loads the latest appointments from the database and displays them
+     * in the Recent Activity section.
+     */
+    private void refreshActivityCard() {
+        if (activityCard == null) {
+            return;
+        }
+
+        activityCard.removeAll();
+
+        JPanel container = new JPanel();
+        container.setOpaque(false);
+        container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
+
+        JLabel title = new JLabel("Recent Activity");
+        title.setFont(new Font("Poppins", Font.BOLD, 16));
         title.setForeground(TEXT);
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        container.add(title);
+        container.add(Box.createVerticalStrut(12));
 
-        card.add(title);
-        card.add(Box.createVerticalStrut(12));
-        card.add(activityRow("Your appointment management dashboard is ready.", BLUE));
-        card.add(Box.createVerticalStrut(8));
-        card.add(activityRow("Use the sidebar menu to quickly access doctor listings, patient records and settings.",
-                GREEN));
+        String sql = """
+            SELECT
+                a.patient_name,
+                d.name AS doctor_name,
+                a.appointment_date,
+                a.appointment_time,
+                a.status
+            FROM appointments a
+            INNER JOIN doctors d ON d.id = a.doctor_id
+            ORDER BY a.created_at DESC, a.id DESC
+            LIMIT 5
+            """;
 
-        return card;
+        boolean found = false;
+
+        try (Connection conn = DB.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                found = true;
+
+                String patient = rs.getString("patient_name");
+                String doctor = rs.getString("doctor_name");
+                String date = rs.getString("appointment_date");
+                String time = rs.getString("appointment_time");
+                String status = rs.getString("status");
+
+                JPanel row = new JPanel(new BorderLayout(10, 0));
+                row.setOpaque(false);
+                row.setBorder(new EmptyBorder(8, 0, 8, 0));
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+                JLabel dot = new JLabel("●");
+                dot.setFont(new Font("Arial", Font.BOLD, 14));
+                dot.setForeground(getStatusColor(status));
+
+                JPanel info = new JPanel();
+                info.setOpaque(false);
+                info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+
+                JLabel patientLabel = new JLabel(patient + "  •  Dr. " + doctor);
+                patientLabel.setFont(new Font("Poppins", Font.BOLD, 12));
+                patientLabel.setForeground(TEXT);
+
+                JLabel detailLabel = new JLabel(date + "  |  " + time + "  |  " + status);
+                detailLabel.setFont(new Font("Poppins", Font.PLAIN, 11));
+                detailLabel.setForeground(MUTED);
+
+                info.add(patientLabel);
+                info.add(Box.createVerticalStrut(3));
+                info.add(detailLabel);
+
+                row.add(dot, BorderLayout.WEST);
+                row.add(info, BorderLayout.CENTER);
+
+                container.add(row);
+            }
+
+        } catch (Exception ex) {
+            JLabel errorLabel = new JLabel("Unable to load recent appointments.");
+            errorLabel.setFont(new Font("Poppins", Font.PLAIN, 12));
+            errorLabel.setForeground(MUTED);
+            container.add(errorLabel);
+        }
+
+        if (!found) {
+            JLabel emptyLabel = new JLabel("No appointments found yet.");
+            emptyLabel.setFont(new Font("Poppins", Font.PLAIN, 12));
+            emptyLabel.setForeground(MUTED);
+            emptyLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            container.add(emptyLabel);
+        }
+
+        activityCard.add(container, BorderLayout.CENTER);
+        activityCard.revalidate();
+        activityCard.repaint();
     }
 
-    private JPanel activityRow(String text, Color dotColor) {
-        JPanel row = new JPanel(new BorderLayout(12, 0));
-        row.setOpaque(false);
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+    private Color getStatusColor(String status) {
+        if (status == null) {
+            return MUTED;
+        }
 
-        JPanel dotWrap = new JPanel(new GridBagLayout());
-        dotWrap.setOpaque(false);
-        dotWrap.add(new Dot(dotColor));
-
-        JLabel label = new JLabel(text);
-        label.setFont(new Font(FONT, Font.PLAIN, 13));
-        label.setForeground(new Color(71, 85, 105));
-
-        row.add(dotWrap, BorderLayout.WEST);
-        row.add(label, BorderLayout.CENTER);
-        return row;
+        switch (status.toLowerCase(Locale.ROOT)) {
+            case "booked":
+                return BLUE;
+            case "completed":
+                return GREEN;
+            case "cancelled":
+            case "canceled":
+                return Color.RED;
+            default:
+                return ORANGE;
+        }
     }
 
-    // =========================================================
-    // LOGOUT (unchanged)
-    // =========================================================
+    /**
+     * Loads dashboard statistics from MySQL.
+     *
+     * Total Patients is temporarily based on appointment patient records.
+     * Later, when a dedicated patients table is added, only that query
+     * needs to be changed.
+     */
+    private void refreshDashboardData() {
+        if (totalAppointmentsValue == null ||
+            todayAppointmentsValue == null ||
+            totalDoctorsValue == null ||
+            totalPatientsValue == null) {
+            return;
+        }
+
+        totalAppointmentsValue.setText(String.valueOf(
+                getCount("SELECT COUNT(*) FROM appointments")
+        ));
+
+        todayAppointmentsValue.setText(String.valueOf(
+                getCount("SELECT COUNT(*) FROM appointments WHERE appointment_date = CURDATE()")
+        ));
+
+        totalDoctorsValue.setText(String.valueOf(
+                getCount("SELECT COUNT(*) FROM doctors")
+        ));
+
+        // Temporary patient count: one row = one appointment patient record.
+        totalPatientsValue.setText(String.valueOf(
+                getCount("SELECT COUNT(*) FROM appointments")
+        ));
+
+        refreshActivityCard();
+    }
+
+    private int getCount(String sql) {
+        try (Connection conn = DB.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+
+        } catch (Exception ex) {
+            System.err.println("Dashboard database error: " + ex.getMessage());
+        }
+
+        return 0;
+    }
 
     private void logout() {
         int result = JOptionPane.showConfirmDialog(
