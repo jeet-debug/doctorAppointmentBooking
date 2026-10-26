@@ -27,7 +27,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 
 /**
- * All Doctors page: browse, search, filter, activate/deactivate and delete.
+ * All Doctors page: browse, search, filter, edit, activate/deactivate and delete.
  * Stays in sync with the rest of the app through {@link DoctorEvents}.
  */
 public class AllDoctorsPanel extends JPanel {
@@ -58,9 +58,9 @@ public class AllDoctorsPanel extends JPanel {
         private static final String ALL_STATUS = "All Status";
 
         private static final int CARD_W = 260;
-        private static final int CARD_H = 392;
+        private static final int CARD_H = 406; // compact card with Edit button
         private static final int PHOTO_W = 228; // CARD_W - 14 - 18
-        private static final int PHOTO_H = 135;
+        private static final int PHOTO_H = 120;
 
         // ---------- state ----------
         private final List<DoctorData> all = new ArrayList<>();
@@ -172,7 +172,7 @@ public class AllDoctorsPanel extends JPanel {
                         setContentAreaFilled(false);
                         setOpaque(false);
                         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                        setPreferredSize(new Dimension(100, 34));
+                        setPreferredSize(new Dimension(100, 30));
                         addMouseListener(new MouseAdapter() {
                                 @Override
                                 public void mouseEntered(MouseEvent e) {
@@ -473,7 +473,7 @@ public class AllDoctorsPanel extends JPanel {
                                 g2.setPaint(new GradientPaint(0, 0, color.brighter(), w, h, color.darker()));
                                 g2.fill(shape);
                                 g2.setColor(Color.WHITE);
-                                g2.setFont(new Font(FONT, Font.BOLD, 40));
+                                g2.setFont(new Font(FONT, Font.BOLD, 34));
                                 FontMetrics fm = g2.getFontMetrics();
                                 g2.drawString(initials,
                                                 (w - fm.stringWidth(initials)) / 2,
@@ -531,18 +531,18 @@ public class AllDoctorsPanel extends JPanel {
                         head.setOpaque(false);
                         head.setLayout(new BoxLayout(head, BoxLayout.Y_AXIS));
                         head.add(photo);
-                        head.add(Box.createVerticalStrut(10));
+                        head.add(Box.createVerticalStrut(8));
                         head.add(name);
                         head.add(Box.createVerticalStrut(4));
                         head.add(spec);
-                        head.add(Box.createVerticalStrut(10));
+                        head.add(Box.createVerticalStrut(4));
 
                         // ---------- info ----------
                         JPanel info = new JPanel();
                         info.setOpaque(false);
                         info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
                         info.setBorder(new javax.swing.border.MatteBorder(1, 0, 0, 0, new Color(232, 237, 245)));
-                        info.add(Box.createVerticalStrut(6));
+                        info.add(Box.createVerticalStrut(4));
                         info.add(row("Experience", d.experience + " yrs"));
                         info.add(row("Fee", "\u20B9 " + (d.fee == Math.floor(d.fee)
                                         ? String.valueOf((long) d.fee)
@@ -553,6 +553,8 @@ public class AllDoctorsPanel extends JPanel {
                         info.add(row("Email", dash(d.email)));
 
                         // ---------- actions ----------
+                        ActionButton edit = new ActionButton("Edit", BLUE, Color.WHITE, LIGHT_BLUE, BLUE,
+                                        DARK_BLUE);
                         ActionButton toggle = d.isActive()
                                         ? new ActionButton("Deactivate", ORANGE, Color.WHITE,
                                                         new Color(254, 243, 226), ORANGE, ORANGE)
@@ -560,14 +562,20 @@ public class AllDoctorsPanel extends JPanel {
                                                         GREEN_BG, GREEN, GREEN);
                         ActionButton delete = new ActionButton("Delete", Color.WHITE, RED, DARK_RED, null,
                                         Color.WHITE);
+                        edit.addActionListener(e -> editDoctor(d));
                         toggle.addActionListener(e -> toggleStatus(d));
                         delete.addActionListener(e -> deleteDoctor(d));
 
-                        JPanel actions = new JPanel(new GridLayout(1, 2, 8, 0));
+                        JPanel bottomRow = new JPanel(new GridLayout(1, 2, 8, 0));
+                        bottomRow.setOpaque(false);
+                        bottomRow.add(toggle);
+                        bottomRow.add(delete);
+
+                        JPanel actions = new JPanel(new GridLayout(2, 1, 0, 6));
                         actions.setOpaque(false);
-                        actions.setBorder(new EmptyBorder(10, 0, 0, 0));
-                        actions.add(toggle);
-                        actions.add(delete);
+                        actions.setBorder(new EmptyBorder(6, 0, 0, 0));
+                        actions.add(edit);
+                        actions.add(bottomRow);
 
                         add(head, BorderLayout.NORTH);
                         add(info, BorderLayout.CENTER);
@@ -965,6 +973,127 @@ public class AllDoctorsPanel extends JPanel {
         // =====================================================
         // ACTIONS
         // =====================================================
+
+        /** Opens a form pre-filled with the doctor's details and saves the changes. */
+        private void editDoctor(DoctorData d) {
+                JTextField nameF = new JTextField(nz(d.name));
+                JTextField specF = new JTextField(nz(d.specialization));
+                JTextField phoneF = new JTextField(nz(d.phone));
+                JTextField emailF = new JTextField(nz(d.email));
+                JTextField daysF = new JTextField(nz(d.days));
+                JTextField timeF = new JTextField(nz(d.time));
+                JTextField feeF = new JTextField(d.fee == Math.floor(d.fee)
+                                ? String.valueOf((long) d.fee)
+                                : String.format("%.2f", d.fee));
+
+                JComboBox<String> genderF = new JComboBox<>(new String[] { "Male", "Female", "Other" });
+                if (d.gender != null && !d.gender.isBlank()) {
+                        boolean found = false;
+                        for (int i = 0; i < genderF.getItemCount(); i++)
+                                if (genderF.getItemAt(i).equalsIgnoreCase(d.gender))
+                                        found = true;
+                        if (!found)
+                                genderF.addItem(d.gender);
+                        genderF.setSelectedItem(d.gender);
+                }
+
+                JSpinner expF = new JSpinner(new SpinnerNumberModel(Math.max(0, d.experience), 0, 70, 1));
+                JComboBox<String> statusF = new JComboBox<>(new String[] { "Active", "Inactive" });
+                statusF.setSelectedItem(d.isActive() ? "Active" : "Inactive");
+
+                for (JComponent c : new JComponent[] { nameF, specF, phoneF, emailF, daysF, timeF, feeF,
+                                genderF, statusF }) {
+                        styleInput(c);
+                        c.setPreferredSize(new Dimension(280, 36));
+                }
+                expF.setPreferredSize(new Dimension(280, 36));
+
+                JPanel form = new JPanel(new GridBagLayout());
+                GridBagConstraints gc = new GridBagConstraints();
+                gc.insets = new Insets(5, 4, 5, 4);
+                gc.anchor = GridBagConstraints.WEST;
+                String[] labels = { "Name *", "Specialization *", "Phone", "Email", "Gender",
+                                "Experience (yrs)", "Consultation Fee (\u20B9)", "Available Days (Mon, Tue...)",
+                                "Available Time (10:00 AM - 05:00 PM)", "Status" };
+                JComponent[] fields = { nameF, specF, phoneF, emailF, genderF, expF, feeF, daysF, timeF, statusF };
+                for (int i = 0; i < labels.length; i++) {
+                        JLabel l = new JLabel(labels[i]);
+                        l.setFont(new Font(FONT, Font.BOLD, 12));
+                        l.setForeground(MUTED);
+                        gc.gridx = 0;
+                        gc.gridy = i;
+                        form.add(l, gc);
+                        gc.gridx = 1;
+                        form.add(fields[i], gc);
+                }
+
+                String phone, email, fee;
+                while (true) {
+                        int choice = JOptionPane.showConfirmDialog(this, form,
+                                        "Edit " + d.displayName(), JOptionPane.OK_CANCEL_OPTION,
+                                        JOptionPane.PLAIN_MESSAGE);
+                        if (choice != JOptionPane.OK_OPTION)
+                                return;
+
+                        String err = null;
+                        phone = phoneF.getText().trim();
+                        email = emailF.getText().trim();
+                        fee = feeF.getText().trim();
+
+                        if (nameF.getText().trim().isEmpty())
+                                err = "Doctor name required hai.";
+                        else if (specF.getText().trim().isEmpty())
+                                err = "Specialization required hai.";
+                        else if (!phone.isEmpty() && !phone.matches("[0-9+\\- ]{7,15}"))
+                                err = "Phone number sahi nahi hai.";
+                        else if (!email.isEmpty() && !email.matches("^[^@\\s]+@[^@\\s]+$"))
+                                err = "Email sahi nahi hai.";
+                        else {
+                                try {
+                                        if (Double.parseDouble(fee.isEmpty() ? "0" : fee) < 0)
+                                                err = "Fee negative nahi ho sakti.";
+                                } catch (NumberFormatException ex) {
+                                        err = "Fee sirf number honi chahiye.";
+                                }
+                        }
+
+                        if (err == null)
+                                break;
+                        JOptionPane.showMessageDialog(this, err, "Invalid Input", JOptionPane.WARNING_MESSAGE);
+                }
+
+                String sql = """
+                                UPDATE doctors SET
+                                    name = ?, specialization = ?, phone = ?, email = ?, gender = ?,
+                                    experience = ?, consultation_fee = ?, available_days = ?,
+                                    available_time = ?, status = ?
+                                WHERE id = ?
+                                """;
+
+                try (Connection con = DB.getConnection();
+                                PreparedStatement ps = con.prepareStatement(sql)) {
+                        ps.setString(1, nameF.getText().trim());
+                        ps.setString(2, specF.getText().trim());
+                        ps.setString(3, phone.isEmpty() ? null : phone);
+                        ps.setString(4, email.isEmpty() ? null : email);
+                        ps.setString(5, (String) genderF.getSelectedItem());
+                        ps.setInt(6, (Integer) expF.getValue());
+                        ps.setDouble(7, Double.parseDouble(fee.isEmpty() ? "0" : fee));
+                        ps.setString(8, daysF.getText().trim());
+                        ps.setString(9, timeF.getText().trim());
+                        ps.setString(10, (String) statusF.getSelectedItem());
+                        ps.setInt(11, d.id);
+                        ps.executeUpdate();
+                } catch (Exception e) {
+                        JOptionPane.showMessageDialog(this,
+                                        "Unable to update doctor:\n" + e.getMessage(),
+                                        "Database Error", JOptionPane.ERROR_MESSAGE);
+                        e.printStackTrace();
+                        return;
+                }
+
+                DoctorEvents.fireChanged(); // baaki saare panels bhi refresh ho jayenge
+        }
 
         private void toggleStatus(DoctorData d) {
                 setStatus(d, d.isActive() ? "Inactive" : "Active");
