@@ -7,11 +7,11 @@ import java.sql.SQLException;
 
 public class DB {
 
-    private static final String URL = "jdbc:mysql://localhost:3306/medibook";
+    private static final String URL = "jdbc:mysql://localhost:3308/medibook";
 
     private static final String USER = "root";
 
-    private static final String PASSWORD = "uday kumar bca";
+    private static final String PASSWORD = "Rishav@12345";
 
     public static Connection getConnection() throws SQLException {
         return DriverManager.getConnection(

@@ -5,6 +5,7 @@ import appointment.BookAppointmentPanel;
 import doctor.AllDoctorsPanel;
 import doctor.DoctorPanel;
 import patient.PatientPanel;
+import settings.SettingsPanel;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -74,6 +75,7 @@ public class App extends JFrame {
     private DoctorPanel doctorPanel;
     private AllDoctorsPanel allDoctorsPanel;
     private PatientPanel patientPanel;
+    private SettingsPanel settingsPanel;
 
     private JLabel headerTitle;
     private JLabel headerSub;
@@ -275,12 +277,14 @@ public class App extends JFrame {
         doctorPanel = new DoctorPanel();
         allDoctorsPanel = new AllDoctorsPanel();
         patientPanel = new PatientPanel();
+        settingsPanel = new SettingsPanel(this::refreshDashboardData);
         pages.add(scrollPane, "dash");
         pages.add(bookPanel, "book");
         pages.add(appointmentsPanel, "appts");
         pages.add(doctorPanel, "doctors");
         pages.add(allDoctorsPanel, "all-doctors");
         pages.add(patientPanel, "patients");
+        pages.add(settingsPanel, "settings");
 
         rightPanel.add(pages, BorderLayout.CENTER);
 
@@ -523,7 +527,7 @@ public class App extends JFrame {
                     showPatientPage();
                 break;
                 case "Settings":
-                    showComingSoon(text);
+                    showSettingsPage();
                     break;
                 default:
                     showComingSoon(text);
@@ -574,6 +578,196 @@ public class App extends JFrame {
         );
 
         pageLayout.show(pages, "patients");
+    }
+
+    private void showSettingsPage() {
+        markActive("Settings", "Settings", "Manage your account and application preferences");
+        pageLayout.show(pages, "settings");
+    }
+
+    /**
+     * Settings page: change the admin password, test the database connection,
+     * and refresh dashboard statistics. Uses the existing users table.
+     */
+    private JPanel createSettingsPanel() {
+        JPanel root = new JPanel();
+        root.setBackground(BG);
+        root.setLayout(new BoxLayout(root, BoxLayout.Y_AXIS));
+        root.setBorder(new EmptyBorder(24, 24, 24, 24));
+
+        JLabel pageTitle = heading("Application Settings", 22, TEXT);
+        root.add(pageTitle);
+        root.add(Box.createVerticalStrut(6));
+
+        JLabel intro = new JLabel("Update your administrator password and check the database connection.");
+        intro.setFont(new Font(FONT, Font.PLAIN, 13));
+        intro.setForeground(MUTED);
+        intro.setBorder(new EmptyBorder(0, 8, 18, 0));
+        intro.setAlignmentX(Component.LEFT_ALIGNMENT);
+        root.add(intro);
+
+        RoundedPanel accountCard = new RoundedPanel(20, null, 20, 22, 20, 22, Color.WHITE, true);
+        accountCard.setLayout(new BorderLayout(0, 16));
+
+        JLabel accountTitle = new JLabel("Administrator Account");
+        accountTitle.setFont(new Font(FONT, Font.BOLD, 17));
+        accountTitle.setForeground(TEXT);
+        accountCard.add(accountTitle, BorderLayout.NORTH);
+
+        JPanel fields = new JPanel(new GridBagLayout());
+        fields.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(7, 0, 7, 14);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1;
+
+        JTextField usernameField = new JTextField("admin", 22);
+        usernameField.setFont(new Font(FONT, Font.PLAIN, 13));
+        JPasswordField currentPassword = new JPasswordField(22);
+        JPasswordField newPassword = new JPasswordField(22);
+        JPasswordField confirmPassword = new JPasswordField(22);
+        for (JPasswordField field : new JPasswordField[]{currentPassword, newPassword, confirmPassword}) {
+            field.setFont(new Font(FONT, Font.PLAIN, 13));
+        }
+
+        addSettingField(fields, gbc, 0, "Username", usernameField);
+        addSettingField(fields, gbc, 1, "Current password", currentPassword);
+        addSettingField(fields, gbc, 2, "New password", newPassword);
+        addSettingField(fields, gbc, 3, "Confirm new password", confirmPassword);
+
+        accountCard.add(fields, BorderLayout.CENTER);
+
+        JPanel accountActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        accountActions.setOpaque(false);
+        RoundedButton saveButton = new RoundedButton("Save Password", BLUE, DARK_BLUE, 12);
+        saveButton.setFont(new Font(FONT, Font.BOLD, 12));
+        saveButton.setPreferredSize(new Dimension(145, 38));
+        saveButton.addActionListener(e -> {
+            String username = usernameField.getText().trim();
+            String current = new String(currentPassword.getPassword());
+            String next = new String(newPassword.getPassword());
+            String confirm = new String(confirmPassword.getPassword());
+
+            if (username.isEmpty() || current.isEmpty() || next.isEmpty() || confirm.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please fill in all account fields.", "Validation", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (next.length() < 6) {
+                JOptionPane.showMessageDialog(this, "New password must contain at least 6 characters.", "Validation", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (!next.equals(confirm)) {
+                JOptionPane.showMessageDialog(this, "New password and confirmation do not match.", "Validation", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            String selectSql = "SELECT password FROM users WHERE username = ?";
+            String updateSql = "UPDATE users SET password = ? WHERE username = ?";
+            try (Connection conn = DB.getConnection();
+                 PreparedStatement select = conn.prepareStatement(selectSql)) {
+                select.setString(1, username);
+                try (ResultSet rs = select.executeQuery()) {
+                    if (!rs.next()) {
+                        JOptionPane.showMessageDialog(this, "Username was not found.", "Account", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                    if (!current.equals(rs.getString("password"))) {
+                        JOptionPane.showMessageDialog(this, "Current password is incorrect.", "Account", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                }
+                try (PreparedStatement update = conn.prepareStatement(updateSql)) {
+                    update.setString(1, next);
+                    update.setString(2, username);
+                    int changed = update.executeUpdate();
+                    if (changed > 0) {
+                        currentPassword.setText("");
+                        newPassword.setText("");
+                        confirmPassword.setText("");
+                        JOptionPane.showMessageDialog(this, "Password updated successfully.", "MediBook", JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        JOptionPane.showMessageDialog(this, "Password was not updated.", "MediBook", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            } catch (SQLException ex) {
+                JOptionPane.showMessageDialog(this, "Could not update password: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        accountActions.add(saveButton);
+        accountCard.add(accountActions, BorderLayout.SOUTH);
+
+        root.add(accountCard);
+        root.add(Box.createVerticalStrut(18));
+
+        RoundedPanel systemCard = new RoundedPanel(20, null, 20, 22, 20, 22, Color.WHITE, true);
+        systemCard.setLayout(new BorderLayout(0, 14));
+        JLabel systemTitle = new JLabel("System & Database");
+        systemTitle.setFont(new Font(FONT, Font.BOLD, 17));
+        systemTitle.setForeground(TEXT);
+        systemCard.add(systemTitle, BorderLayout.NORTH);
+
+        JLabel systemDescription = new JLabel("Check the MySQL connection or reload the dashboard's appointment statistics.");
+        systemDescription.setFont(new Font(FONT, Font.PLAIN, 13));
+        systemDescription.setForeground(MUTED);
+
+        JPanel systemActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        systemActions.setOpaque(false);
+        RoundedButton testButton = new RoundedButton("Test Database", new Color(22, 163, 74), new Color(21, 128, 61), 12);
+        testButton.setFont(new Font(FONT, Font.BOLD, 12));
+        testButton.setPreferredSize(new Dimension(135, 38));
+        testButton.addActionListener(e -> {
+            try (Connection conn = DB.getConnection()) {
+                if (conn != null && !conn.isClosed()) {
+                    JOptionPane.showMessageDialog(this, "Database connection is working.", "Database Status", JOptionPane.INFORMATION_MESSAGE);
+                } else {
+                    JOptionPane.showMessageDialog(this, "Database connection is not available.", "Database Status", JOptionPane.ERROR_MESSAGE);
+                }
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Database connection failed: " + ex.getMessage(), "Database Status", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        RoundedButton refreshButton = new RoundedButton("Refresh Dashboard Data", BLUE, DARK_BLUE, 12);
+        refreshButton.setFont(new Font(FONT, Font.BOLD, 12));
+        refreshButton.setPreferredSize(new Dimension(190, 38));
+        refreshButton.addActionListener(e -> {
+            refreshDashboardData();
+            JOptionPane.showMessageDialog(this, "Dashboard statistics refreshed.", "MediBook", JOptionPane.INFORMATION_MESSAGE);
+        });
+        systemActions.add(testButton);
+        systemActions.add(refreshButton);
+
+        JPanel systemContent = new JPanel();
+        systemContent.setOpaque(false);
+        systemContent.setLayout(new BoxLayout(systemContent, BoxLayout.Y_AXIS));
+        systemDescription.setAlignmentX(Component.LEFT_ALIGNMENT);
+        systemContent.add(systemDescription);
+        systemContent.add(Box.createVerticalStrut(14));
+        systemContent.add(systemActions);
+        systemCard.add(systemContent, BorderLayout.CENTER);
+
+        root.add(systemCard);
+        root.add(Box.createVerticalGlue());
+        return root;
+    }
+
+    private void addSettingField(JPanel panel, GridBagConstraints gbc, int row, String label, JComponent field) {
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
+        gbc.gridwidth = 1;
+        JLabel fieldLabel = new JLabel(label);
+        fieldLabel.setFont(new Font(FONT, Font.BOLD, 12));
+        fieldLabel.setForeground(TEXT);
+        panel.add(fieldLabel, gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 1;
+        gbc.insets = new Insets(7, 0, 7, 0);
+        field.setPreferredSize(new Dimension(280, 34));
+        panel.add(field, gbc);
+        gbc.insets = new Insets(7, 0, 7, 14);
     }
 
     private void showComingSoon(String name) {
